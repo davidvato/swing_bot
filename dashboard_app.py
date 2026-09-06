@@ -1,0 +1,319 @@
+import os
+import sqlite3
+from fastapi import FastAPI, HTTPException
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+from pydantic import BaseModel
+import config
+from dotenv import load_dotenv
+
+# Try to import alpaca, fail gracefully if not configured properly
+try:
+    from alpaca.trading.client import TradingClient
+    alpaca_available = True
+except ImportError:
+    alpaca_available = False
+
+load_dotenv()
+
+app = FastAPI(title="Swing Trading Bot Dashboard")
+
+from fastapi import Request
+
+@app.middleware("http")
+async def add_no_cache_header(request: Request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
+def get_db_connection():
+    conn = sqlite3.connect(config.DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+@app.get("/api/config")
+def get_bot_config():
+    """Returns basic configuration rules of the bot."""
+    return {
+        "Kelly Fraction": config.KELLY_FRACTION,
+        "Max Position %": f"{config.MAX_POSITION_PCT * 100}%",
+        "Take Profit": f"{config.TAKE_PROFIT_PCT * 100}%",
+        "Stop Loss": f"{config.STOP_LOSS_PCT * 100}%",
+        "Max Hold Days": config.MAX_HOLD_DAYS,
+        "Universe": config.TICKERS
+    }
+
+
+@app.get("/api/universe")
+def get_universe():
+    """
+    Returns the active trading universe selected by the dynamic screener.
+
+    Reads from the universe_cache.json file written by UniverseScreener.
+    If the cache doesn't exist yet (first run before Monday), returns the
+    static fallback TICKERS from config.py.
+
+    Response fields:
+      - active_universe: list of selected ticker symbols
+      - scores: dict {ticker: liquidity_score} (price * avg_volume)
+      - last_updated: ISO timestamp of the last screener run (null if fallback)
+      - source: 'dynamic_screener' | 'static_fallback'
+      - universe_size: number of active tickers
+      - candidate_pool_size: total candidates evaluated by the screener
+      - next_update: 'Every Monday at 09:35 EST'
+    """
+    import json
+    from pathlib import Path
+
+    cache_path = Path(config.UNIVERSE_CACHE_FILE)
+
+    if cache_path.exists():
+        try:
+            payload = json.loads(cache_path.read_text(encoding="utf-8"))
+            payload["next_update"] = "Every Monday at 09:35 EST"
+            return payload
+        except Exception as e:
+            pass  # Fall through to static fallback
+
+    # Static fallback
+    return {
+        "active_universe": config.TICKERS,
+        "scores": {},
+        "last_updated": None,
+        "source": "static_fallback",
+        "universe_size": len(config.TICKERS),
+        "candidate_pool_size": 0,
+        "next_update": "Every Monday at 09:35 EST",
+    }
+
+@app.get("/api/budget")
+def get_budget():
+    """Returns the available budget (Buying Power and Equity) from Alpaca."""
+    API_KEY = os.getenv("ALPACA_API_KEY")
+    SECRET_KEY = os.getenv("ALPACA_SECRET_KEY")
+    PAPER = os.getenv("ALPACA_PAPER", "True") == "True"
+    
+    # Check if Alpaca is configured and available
+    if alpaca_available and API_KEY and SECRET_KEY:
+        try:
+            client = TradingClient(API_KEY, SECRET_KEY, paper=PAPER)
+            account = client.get_account()
+            return {
+                "equity": float(account.equity),
+                "buying_power": float(account.buying_power),
+                "source": "Alpaca API"
+            }
+        except Exception as e:
+            print(f"Error fetching Alpaca account: {e}")
+            pass
+            
+    # Fallback to calculating an estimated equity from initial+pnl if no Alpaca
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT SUM(pnl) as total_pnl FROM trades WHERE pnl IS NOT NULL")
+        row = cur.fetchone()
+        total_pnl = row["total_pnl"] if row["total_pnl"] else 0
+        conn.close()
+        # Default starting mock equity of $10,000 for demonstration purposes
+        return {
+            "equity": 10000 + total_pnl,
+            "buying_power": 10000 + total_pnl,
+            "source": "Local Estimate ($10k base)"
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.get("/api/trades")
+def get_trades():
+    """
+    Returns trades grouped as round-trips (BUY + SELL paired into one record).
+
+    Algorithm: sort all rows chronologically, then for each ticker maintain a
+    FIFO queue of pending BUYs. Each SELL_* dequeues the oldest matching BUY
+    and emits a 'CLOSED' record. Remaining BUYs without a matching SELL are
+    emitted as 'OPEN' records.
+
+    Sort order: OPEN positions first (most recent entry), then CLOSED sorted
+    by exit_date descending.
+    """
+    try:
+        from collections import defaultdict, deque
+        from datetime import datetime as _dt
+
+        conn = get_db_connection()
+        cur = conn.cursor()
+        # Ascending order is critical for the FIFO matching to work correctly
+        cur.execute("SELECT * FROM trades ORDER BY date ASC, id ASC")
+        rows = [dict(r) for r in cur.fetchall()]
+        conn.close()
+
+        pending_buys: dict = defaultdict(deque)   # ticker -> deque of BUY dicts
+        paired: list = []
+
+        for row in rows:
+            ticker = row["ticker"]
+            if row["trade_type"] == "BUY":
+                pending_buys[ticker].append(row)
+            elif row["trade_type"].startswith("SELL"):
+                if pending_buys[ticker]:
+                    buy = pending_buys[ticker].popleft()
+                    # Compute holding duration in calendar days
+                    try:
+                        d1 = _dt.strptime(buy["date"].split(" ")[0], "%Y-%m-%d")
+                        d2 = _dt.strptime(row["date"].split(" ")[0], "%Y-%m-%d")
+                        duration_days = (d2 - d1).days
+                    except Exception:
+                        duration_days = None
+
+                    paired.append({
+                        "status": "CLOSED",
+                        "ticker": ticker,
+                        "sell_type": row["trade_type"],
+                        "entry_date": buy["date"],
+                        "exit_date": row["date"],
+                        "entry_price": buy["entry_price"],
+                        "exit_price": row["exit_price"],
+                        "qty": buy["qty"],
+                        "notional": buy["notional"],
+                        "pnl": row["pnl"],
+                        "pnl_pct": row["pnl_pct"],
+                        "kelly_pct": buy["kelly_pct"],
+                        "duration_days": duration_days,
+                        "buy_id": buy["id"],
+                        "sell_id": row["id"],
+                    })
+                # Orphan SELL with no matching BUY — silently skip
+
+        # Remaining unmatched BUYs → OPEN positions
+        for ticker, buy_queue in pending_buys.items():
+            for buy in buy_queue:
+                paired.append({
+                    "status": "OPEN",
+                    "ticker": ticker,
+                    "sell_type": None,
+                    "entry_date": buy["date"],
+                    "exit_date": None,
+                    "entry_price": buy["entry_price"],
+                    "exit_price": None,
+                    "qty": buy["qty"],
+                    "notional": buy["notional"],
+                    "pnl": None,
+                    "pnl_pct": None,
+                    "kelly_pct": buy["kelly_pct"],
+                    "duration_days": None,
+                    "buy_id": buy["id"],
+                    "sell_id": None,
+                })
+
+        # Sort: OPEN first (newest entry first), then CLOSED by exit_date DESC
+        open_trades = sorted(
+            [t for t in paired if t["status"] == "OPEN"],
+            key=lambda x: x["entry_date"],
+            reverse=True,
+        )
+        closed_trades = sorted(
+            [t for t in paired if t["status"] == "CLOSED"],
+            key=lambda x: x["exit_date"],
+            reverse=True,
+        )
+        return open_trades + closed_trades
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/metrics")
+def get_metrics():
+    """Calculates performance metrics based on trade history."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        
+        # We consider a trade completed if it has a PNL (usually sell orders)
+        cur.execute("SELECT COUNT(*) as cnt FROM trades WHERE pnl > 0")
+        winning_trades = cur.fetchone()["cnt"]
+        
+        cur.execute("SELECT COUNT(*) as cnt FROM trades WHERE pnl <= 0 AND pnl IS NOT NULL")
+        losing_trades = cur.fetchone()["cnt"]
+        
+        cur.execute("SELECT SUM(pnl) as total_pnl FROM trades WHERE pnl IS NOT NULL")
+        row = cur.fetchone()
+        total_pnl = row["total_pnl"] if row["total_pnl"] else 0
+        
+        conn.close()
+        
+        total_completed = winning_trades + losing_trades
+        win_rate = (winning_trades / total_completed * 100) if total_completed > 0 else 0
+        
+        return {
+            "total_pnl": total_pnl,
+            "win_rate": win_rate,
+            "winning_trades": winning_trades,
+            "losing_trades": losing_trades,
+            "total_trades": total_completed
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/chart/{ticker}")
+def get_chart_data(ticker: str, entry_price: float = None):
+    """Returns historical daily bars for a ticker to plot on the chart.
+    
+    Optionally accepts entry_price to compute TP (+10%) and SL (-5%) levels.
+    Response is a dict with 'bars' (OHLCV list) and optional 'levels' (TP/SL).
+    """
+    API_KEY = os.getenv("ALPACA_API_KEY")
+    SECRET_KEY = os.getenv("ALPACA_SECRET_KEY")
+    
+    if not (API_KEY and SECRET_KEY):
+        raise HTTPException(status_code=500, detail="Alpaca keys not configured in .env")
+        
+    try:
+        from data.ingestion import DataClient
+        client = DataClient(API_KEY, SECRET_KEY)
+        data_dict = client.get_historical_data([ticker], lookback_days=100)
+        
+        if ticker not in data_dict:
+            raise HTTPException(status_code=404, detail=f"No data found for {ticker}")
+            
+        df = data_dict[ticker]
+        
+        # Convert to lightweight-charts format
+        bars = []
+        for index, row in df.iterrows():
+            bars.append({
+                "time": index.strftime('%Y-%m-%d'),
+                "open": round(float(row["open"]), 4),
+                "high": round(float(row["high"]), 4),
+                "low": round(float(row["low"]), 4),
+                "close": round(float(row["close"]), 4),
+            })
+        
+        # Compute TP/SL levels if entry_price was provided
+        levels = None
+        if entry_price and entry_price > 0:
+            levels = {
+                "entry": round(entry_price, 4),
+                "tp": round(entry_price * (1 + config.TAKE_PROFIT_PCT), 4),
+                "sl": round(entry_price * (1 - config.STOP_LOSS_PCT), 4),
+                "tp_pct": config.TAKE_PROFIT_PCT * 100,
+                "sl_pct": config.STOP_LOSS_PCT * 100,
+            }
+            
+        return {"bars": bars, "levels": levels}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Mount static files
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+@app.get("/")
+def read_index():
+    return FileResponse("static/index.html")
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run("dashboard_app:app", host="0.0.0.0", port=port)

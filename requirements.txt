@@ -1,0 +1,26 @@
+# ─── Broker y datos de mercado ────────────────────────────────────────────────
+alpaca-py>=0.30.0
+
+# ─── Procesamiento de datos ───────────────────────────────────────────────────
+pandas>=2.0.0
+# pandas-ta: opcional, los indicadores SMA/RSI estan implementados en pandas puro
+# (pandas-ta requiere numba, que no soporta Python 3.14+)
+# pandas-ta>=0.3.14b0
+
+# ─── Configuracion de entorno ─────────────────────────────────────────────────
+python-dotenv>=1.0.0
+
+# ─── Planificador de tareas ───────────────────────────────────────────────────
+schedule>=1.2.0
+
+# ─── Zonas horarias ───────────────────────────────────────────────────────────
+pytz>=2024.1
+
+# ─── Pruebas unitarias ────────────────────────────────────────────────────────
+pytest>=8.0.0
+pytest-cov>=5.0.0
+pytest-asyncio>=0.23.0
+
+# ─── Dashboard ────────────────────────────────────────────────────────────────
+fastapi>=0.109.0
+uvicorn>=0.27.0

@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Swing Trading Bot Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/styles.css">
+    <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar / Settings Info -->
+        <aside class="glass-panel sidebar">
+            <h2>Swing Bot <span class="status-indicator"></span></h2>
+            <div class="config-section">
+                <h3>Configuration</h3>
+                <ul id="config-list">
+                    <li>Loading...</li>
+                </ul>
+            </div>
+            
+            <div class="market-universe">
+                <h3>Universe</h3>
+                <div id="tickers-container" class="tags">
+                    <!-- Tickers will be injected here -->
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Dashboard -->
+        <main class="dashboard-main">
+            <header class="top-nav glass-panel">
+                <h1>Performance Overview</h1>
+            </header>
+
+            <!-- KPI Cards -->
+            <section class="kpi-grid">
+                <div class="kpi-card glass-panel">
+                    <h3>Total Budget (Equity)</h3>
+                    <p class="kpi-value" id="kpi-equity">---</p>
+                    <span class="kpi-subtitle" id="equity-source">Loading...</span>
+                </div>
+                <div class="kpi-card glass-panel">
+                    <h3>Total PnL</h3>
+                    <p class="kpi-value" id="kpi-pnl">---</p>
+                </div>
+                <div class="kpi-card glass-panel">
+                    <h3>Win Rate</h3>
+                    <p class="kpi-value" id="kpi-winrate">---</p>
+                    <span class="kpi-subtitle" id="winrate-details">W: 0 | L: 0</span>
+                </div>
+                <div class="kpi-card glass-panel">
+                    <h3>Buying Power</h3>
+                    <p class="kpi-value" id="kpi-buyingpower">---</p>
+                </div>
+            </section>
+
+            <!-- Trade History Table -->
+            <section class="trades-section glass-panel">
+                <h2>Trade History</h2>
+                <div class="table-responsive">
+                    <table class="modern-table">
+                        <thead>
+                            <tr>
+                                <th>Entry Date</th>
+                                <th>Exit Date</th>
+                                <th>Ticker</th>
+                                <th>Result</th>
+                                <th>Entry $</th>
+                                <th>Exit $</th>
+                                <th>Qty</th>
+                                <th>Duration</th>
+                                <th>P&amp;L</th>
+                                <th>P&amp;L %</th>
+                            </tr>
+                        </thead>
+                        <tbody id="trades-tbody">
+                            <tr>
+                                <td colspan="10" class="text-center">Loading trades...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Chart Modal -->
+    <div id="chart-modal" class="modal">
+        <div class="modal-content glass-panel">
+            <div class="modal-header">
+                <h2 id="modal-title">Ticker Chart</h2>
+                <button class="close-btn" onclick="closeChartModal()">&times;</button>
+            </div>
+            <div id="modal-loader" class="loader text-center">Loading chart data...</div>
+            <div id="chart-container" class="chart-container"></div>
+        </div>
+    </div>
+
+    <script src="/static/app.js?v=3"></script>
+</body>
+</html>
