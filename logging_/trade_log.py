@@ -81,6 +81,8 @@ CSV_COLUMNS = [
 ]
 
 
+from logging_.telegram import TelegramNotifier
+
 class TradeLogger:
     """
     Bitacora de operaciones con persistencia en SQLite y exportacion CSV.
@@ -97,6 +99,7 @@ class TradeLogger:
         """
         self._db_path = db_path
         self._initialize_db()
+        self.notifier = TelegramNotifier()
         logger.info(f"TradeLogger inicializado. Base de datos: {os.path.abspath(db_path)}")
 
     def _initialize_db(self) -> None:
@@ -174,6 +177,16 @@ class TradeLogger:
             f"Precio entrada: ${row['entry_price']:.2f} | "
             f"ID: {row_id}"
         )
+        
+        # Send Telegram notification
+        msg = (
+            f"🟢 <b>NUEVA COMPRA: {row['ticker']}</b>\n"
+            f"Nocional: ${row['notional']:.2f}\n"
+            f"Precio: ${row['entry_price']:.2f}\n"
+            f"Cant: {row['qty']:.4f}"
+        )
+        self.notifier.send_message(msg)
+        
         return row_id
 
     def log_exit(self, trade_data: dict) -> int:
@@ -220,6 +233,18 @@ class TradeLogger:
             f"P&L: {pnl_symbol}${row['pnl']:.2f} ({pnl_symbol}{(row['pnl_pct'] or 0)*100:.2f}%) | "
             f"ID: {row_id}"
         )
+        
+        # Send Telegram notification
+        emoji = "🔴" if row['pnl'] < 0 else "🟢"
+        msg = (
+            f"{emoji} <b>VENTA CERRADA: {row['ticker']}</b>\n"
+            f"Tipo: {row['trade_type']}\n"
+            f"P&L: {pnl_symbol}${row['pnl']:.2f} ({pnl_symbol}{(row['pnl_pct'] or 0)*100:.2f}%)\n"
+            f"Precio Entrada: ${row['entry_price']:.2f}\n"
+            f"Precio Salida: ${row['exit_price']:.2f}"
+        )
+        self.notifier.send_message(msg)
+        
         return row_id
 
     def get_latest_buy(self, ticker: str) -> dict:
@@ -355,4 +380,15 @@ class TradeLogger:
             f"Win rate={summary['win_rate']*100:.1f}% | "
             f"Impuesto estimado SIC (10%)=${summary['taxable_gain_usd']:.2f}"
         )
+        
+        # Send Telegram notification
+        msg = (
+            f"📊 <b>RESUMEN MENSUAL: {month}</b>\n"
+            f"Operaciones: {total} (W: {wins} / L: {summary['losing_trades']})\n"
+            f"Win Rate: {summary['win_rate']*100:.1f}%\n"
+            f"P&L Neto: ${total_pnl:+.2f}\n"
+            f"Impuesto SIC (10%): ${summary['taxable_gain_usd']:.2f}"
+        )
+        self.notifier.send_message(msg)
+        
         return summary

@@ -439,6 +439,8 @@ async def run_main_loop(
     logger.info("=" * 60)
     logger.info("BOT INICIADO — MODO PRODUCCION (paper=True)")
     logger.info("=" * 60)
+    
+    trade_logger.notifier.send_message("🚀 <b>Swing Trading Bot Iniciado</b>\nModo Producción Activo (Paper Trading)")
 
     # Rehidratacion de estado asincrona
     logger.info("Re-hidratando estado de posiciones activas...")

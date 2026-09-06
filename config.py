@@ -79,3 +79,8 @@ TRADE_TYPE_SELL_TP: str = "SELL_TP"   # Venta por Take-Profit (+10%)
 TRADE_TYPE_SELL_SL: str = "SELL_SL"   # Venta por Stop-Loss (-5%)
 TRADE_TYPE_SELL_EOW: str = "SELL_EOW" # Venta del viernes (End-Of-Week)
 TRADE_TYPE_SELL_5D: str = "SELL_5D"   # Venta por maximo de 5 dias de holding
+
+# --- Telegram Notifications --------------------------------------------------
+import os
+TELEGRAM_BOT_TOKEN: str = os.getenv('TELEGRAM_BOT_TOKEN', '')
+TELEGRAM_CHAT_ID: str = os.getenv('TELEGRAM_CHAT_ID', '')
