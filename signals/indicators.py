@@ -23,6 +23,9 @@ from config import (
     RSI_PERIOD,
     RSI_OVERSOLD,
     CONSEC_DOWN_DAYS,
+    CRYPTO_SMA_PERIOD,
+    CRYPTO_RSI_PERIOD,
+    CRYPTO_RSI_OVERSOLD,
 )
 
 logger = logging.getLogger(__name__)
@@ -224,3 +227,108 @@ def get_signal_summary(ticker: str, df: pd.DataFrame) -> dict:
         "above_sma": bool(last["close"] > last[COL_SMA]) if pd.notna(last[COL_SMA]) else False,
         "signal": generate_signal(df),
     }
+
+
+# ─── Funciones de Cripto (parametros aislados CRYPTO_*) ───────────────────────
+
+COL_CRYPTO_SMA = f"SMA_{CRYPTO_SMA_PERIOD}"
+COL_CRYPTO_RSI = f"RSI_{CRYPTO_RSI_PERIOD}"
+COL_CRYPTO_CONSEC_DOWN = "CRYPTO_CONSEC_DOWN"
+
+
+def compute_crypto_indicators(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Calcula indicadores tecnicos para activos cripto.
+
+    Usa parametros CRYPTO_* (SMA-50, RSI-4) calibrados para la
+    mayor volatilidad del mercado de criptomonedas.
+
+    Args:
+        df: DataFrame con columna 'close' y al menos 50 sesiones horarias.
+
+    Returns:
+        DataFrame con columnas adicionales:
+            - SMA_50: Media Movil Simple de 50 periodos.
+            - RSI_4: Indice de Fuerza Relativa de 4 periodos.
+            - CRYPTO_CONSEC_DOWN: Ultimos 4 cierres consecutivamente bajistas.
+    """
+    if "close" not in df.columns:
+        raise ValueError(
+            "El DataFrame debe contener la columna 'close'. "
+            f"Columnas disponibles: {list(df.columns)}"
+        )
+
+    df = df.copy()
+    df[COL_CRYPTO_SMA] = _compute_sma(df["close"], CRYPTO_SMA_PERIOD)
+    df[COL_CRYPTO_RSI] = _compute_rsi(df["close"], CRYPTO_RSI_PERIOD)
+
+    consec_vals = []
+    for idx in range(len(df)):
+        sub = df.iloc[: idx + 1]
+        consec_vals.append(check_consecutive_down(sub, CONSEC_DOWN_DAYS))
+    df[COL_CRYPTO_CONSEC_DOWN] = consec_vals
+
+    return df
+
+
+def generate_crypto_signal(df: pd.DataFrame) -> bool:
+    """
+    Evalua la condicion de señal de compra LONG para cripto.
+
+    Logica (misma estructura que equities, umbrales cripto):
+        SEÑAL = (close > SMA_50) AND (RSI_4 < 30 OR CONSEC_DOWN==True)
+
+    Args:
+        df: DataFrame con indicadores cripto calculados.
+
+    Returns:
+        True si hay señal de entrada LONG valida.
+    """
+    if df.empty:
+        return False
+
+    required = [COL_CRYPTO_SMA, COL_CRYPTO_RSI, COL_CRYPTO_CONSEC_DOWN]
+    for col in required:
+        if col not in df.columns:
+            logger.warning(f"[CRYPTO] Columna '{col}' no encontrada. Sin señal.")
+            return False
+
+    last = df.iloc[-1]
+    close = last["close"]
+    sma = last[COL_CRYPTO_SMA]
+    rsi = last[COL_CRYPTO_RSI]
+    consec_down = bool(last[COL_CRYPTO_CONSEC_DOWN])
+
+    import math
+    if any(math.isnan(v) for v in [close, sma, rsi] if isinstance(v, float)):
+        return False
+
+    above_sma = close > sma
+    oversold = rsi < CRYPTO_RSI_OVERSOLD
+    signal = above_sma and (oversold or consec_down)
+
+    logger.info(
+        f"[CRYPTO] Señal → close={close:.4f}, SMA={sma:.4f}, "
+        f"RSI={rsi:.2f}, ConsecDown={consec_down} → SEÑAL={signal}"
+    )
+    return bool(signal)
+
+
+def get_crypto_signal_summary(symbol: str, df: pd.DataFrame) -> dict:
+    """Retorna un resumen estructurado del estado de señal cripto."""
+    if df.empty or COL_CRYPTO_SMA not in df.columns:
+        return {"ticker": symbol, "signal": False, "error": "Datos insuficientes"}
+
+    last = df.iloc[-1]
+    atr_val = float(last["atr"]) if "atr" in df.columns and pd.notna(last.get("atr")) else None
+    return {
+        "ticker": symbol,
+        "close": round(float(last["close"]), 4),
+        "sma_50": round(float(last[COL_CRYPTO_SMA]), 4) if pd.notna(last[COL_CRYPTO_SMA]) else None,
+        "rsi_4": round(float(last[COL_CRYPTO_RSI]), 4) if pd.notna(last[COL_CRYPTO_RSI]) else None,
+        "consec_down": bool(last[COL_CRYPTO_CONSEC_DOWN]),
+        "above_sma": bool(last["close"] > last[COL_CRYPTO_SMA]) if pd.notna(last[COL_CRYPTO_SMA]) else False,
+        "atr": round(atr_val, 4) if atr_val else None,
+        "signal": generate_crypto_signal(df),
+    }
+

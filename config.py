@@ -84,3 +84,70 @@ TRADE_TYPE_SELL_5D: str = "SELL_5D"   # Venta por maximo de 5 dias de holding
 import os
 TELEGRAM_BOT_TOKEN: str = os.getenv('TELEGRAM_BOT_TOKEN', '')
 TELEGRAM_CHAT_ID: str = os.getenv('TELEGRAM_CHAT_ID', '')
+
+# ─── Crypto Module ────────────────────────────────────────────────────────────
+# IMPORTANTE: Todos los parametros CRYPTO_* estan completamente aislados.
+# Nunca se mezclan con los parametros del motor de equities.
+
+# Universo fallback (si CoinGecko falla) — Top-10 por market cap, sin stablecoins
+CRYPTO_FALLBACK_TICKERS: list[str] = [
+    "BTC/USD",   # Bitcoin
+    "ETH/USD",   # Ethereum
+    "BNB/USD",   # BNB
+    "SOL/USD",   # Solana
+    "XRP/USD",   # Ripple
+    "DOGE/USD",  # Dogecoin
+    "ADA/USD",   # Cardano
+    "AVAX/USD",  # Avalanche
+    "LINK/USD",  # Chainlink
+    "DOT/USD",   # Polkadot
+]
+CRYPTO_UNIVERSE_SIZE: int = 10
+CRYPTO_UNIVERSE_CACHE: str = "crypto_universe_cache.json"
+CRYPTO_UNIVERSE_UPDATE_UTC: str = "00:01"  # Cada domingo/lunes medianoche UTC
+
+# Parametros de indicadores (calibrados para volatilidad cripto)
+CRYPTO_SMA_PERIOD: int = 50          # SMA-50 (estandar en cripto vs SMA-200 en equities)
+CRYPTO_RSI_PERIOD: int = 4           # RSI-4 (robusto en ambos mercados)
+CRYPTO_RSI_OVERSOLD: float = 30.0    # Umbral RSI sobreventa
+
+# ─── TP/SL Dinamico basado en ATR (Average True Range) ───────────────────────
+# Formula:
+#   TP = entry_price + (ATR_14 × CRYPTO_ATR_TP_MULT)  → Risk/Reward 2:1
+#   SL = entry_price - (ATR_14 × CRYPTO_ATR_SL_MULT)
+# Ventaja: Se adapta automaticamente a la volatilidad real del activo.
+# Evita "Stop Hunt" / "Whipsaw" en mercados de alta volatilidad.
+CRYPTO_ATR_PERIOD: int = 14          # Periodo ATR (estandar de industria)
+CRYPTO_ATR_TP_MULT: float = 2.0      # Multiplicador TP → captura mas recorrido
+CRYPTO_ATR_SL_MULT: float = 1.0      # Multiplicador SL → ratio R:R de 2:1
+# Fallback fijo si ATR no se puede calcular (datos insuficientes)
+CRYPTO_TAKE_PROFIT_PCT: float = 0.05
+CRYPTO_STOP_LOSS_PCT: float = 0.05
+
+# Parametros de gestion de posicion
+CRYPTO_MAX_HOLD_HOURS: int = 72      # Maximo de holding en horas (cripto no cierra)
+CRYPTO_MAX_POSITION_PCT: float = 0.05  # 5% del equity por posicion (conservador)
+CRYPTO_POLL_INTERVAL_SEC: int = 300  # Supervisor revisa cada 5 min (24/7)
+
+# Almacenamiento
+CRYPTO_CACHE_FILE: str = "crypto_prices_cache.json"
+CRYPTO_DB_TABLE: str = "crypto_trades"  # Tabla SQLite separada para cripto
+
+# CoinGecko API (gratuita, sin API key)
+COINGECKO_API_URL: str = "https://api.coingecko.com/api/v3"
+
+# Mapa CoinGecko symbol → par Alpaca (para filtrado y conversion)
+COINGECKO_TO_ALPACA: dict = {
+    "bitcoin": "BTC/USD", "ethereum": "ETH/USD", "binancecoin": "BNB/USD",
+    "solana": "SOL/USD", "ripple": "XRP/USD", "dogecoin": "DOGE/USD",
+    "cardano": "ADA/USD", "avalanche-2": "AVAX/USD", "chainlink": "LINK/USD",
+    "polkadot": "DOT/USD", "shiba-inu": "SHIB/USD", "litecoin": "LTC/USD",
+    "uniswap": "UNI/USD", "bitcoin-cash": "BCH/USD", "stellar": "XLM/USD",
+    "monero": "XMR/USD", "ethereum-classic": "ETC/USD", "filecoin": "FIL/USD",
+    "aave": "AAVE/USD", "the-graph": "GRT/USD",
+}
+# IDs de stablecoins a excluir del ranking de CoinGecko
+COINGECKO_STABLECOIN_IDS: set = {
+    "tether", "usd-coin", "dai", "binance-usd", "true-usd",
+    "pax-dollar", "frax", "usdd", "gemini-dollar", "terrausd",
+}

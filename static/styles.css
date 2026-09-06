@@ -358,3 +358,192 @@ body {
     0%, 100% { opacity: 1;   transform: scale(1);   }
     50%       { opacity: 0.3; transform: scale(0.7); }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   CRYPTO MODULE STYLES
+   Palette: orange/gold gradient to visually differentiate from equities (green)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Tab Navigation ─────────────────────────────────────────────────────── */
+.tab-nav {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+.tab-btn {
+    background: transparent;
+    border: 1px solid rgba(255,255,255,0.12);
+    color: var(--text-secondary);
+    padding: 0.55rem 1.4rem;
+    border-radius: 50px;
+    font-family: 'Inter', sans-serif;
+    font-size: 0.92rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.25s ease;
+    letter-spacing: 0.02em;
+}
+.tab-btn:hover {
+    background: rgba(255,255,255,0.06);
+    color: var(--text-primary);
+}
+.tab-btn.active {
+    background: linear-gradient(135deg, #f59e0b, #d97706);
+    border-color: transparent;
+    color: #0a0a0f;
+    box-shadow: 0 4px 20px rgba(245, 158, 11, 0.35);
+}
+#tab-equities.active {
+    background: linear-gradient(135deg, #3b82f6, #2563eb);
+    box-shadow: 0 4px 20px rgba(59, 130, 246, 0.35);
+    color: #fff;
+}
+
+/* ── Tab Panes ─────────────────────────────────────────────────────────── */
+.tab-pane { display: none; }
+.tab-pane.active { display: block; }
+
+/* ── Crypto KPI Cards ───────────────────────────────────────────────────── */
+.crypto-card {
+    border-top: 2px solid rgba(245, 158, 11, 0.5);
+    background: linear-gradient(135deg, rgba(245, 158, 11, 0.05), rgba(217, 119, 6, 0.03));
+}
+.crypto-atr-badge {
+    font-size: 1.4rem !important;
+    background: linear-gradient(135deg, #f59e0b, #fbbf24);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+/* ── Sidebar Crypto Universe ────────────────────────────────────────────── */
+.crypto-universe-sidebar {
+    margin-top: 1.5rem;
+    border-top: 1px solid rgba(245, 158, 11, 0.2);
+    padding-top: 1rem;
+}
+.crypto-tags { flex-wrap: wrap; gap: 0.4rem; }
+.crypto-tag {
+    background: linear-gradient(135deg, rgba(245,158,11,0.2), rgba(217,119,6,0.1)) !important;
+    color: #fbbf24 !important;
+    border: 1px solid rgba(245,158,11,0.3) !important;
+    font-size: 0.72rem;
+}
+.universe-meta {
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+    margin-top: 0.4rem;
+}
+
+/* ── Crypto Prices Section ──────────────────────────────────────────────── */
+.crypto-prices-section {
+    margin-bottom: 1.5rem;
+}
+.section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1.2rem;
+}
+.section-header h2 { margin: 0; }
+.update-badge {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    background: rgba(255,255,255,0.05);
+    padding: 0.25rem 0.7rem;
+    border-radius: 50px;
+    border: 1px solid rgba(255,255,255,0.08);
+}
+
+/* ── Crypto Price Grid ──────────────────────────────────────────────────── */
+.crypto-price-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(175px, 1fr));
+    gap: 1rem;
+}
+.crypto-price-card {
+    padding: 1.1rem 1rem;
+    border-radius: 14px;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    border-top: 2px solid rgba(245, 158, 11, 0.35);
+    cursor: default;
+}
+.crypto-price-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 32px rgba(245,158,11,0.15);
+}
+.crypto-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.15rem;
+}
+.crypto-symbol {
+    font-size: 1.05rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    background: linear-gradient(135deg, #f59e0b, #fbbf24);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+.crypto-card-name {
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+    margin-bottom: 0.5rem;
+}
+.crypto-price {
+    font-size: 1.15rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 0.4rem;
+    font-variant-numeric: tabular-nums;
+}
+.crypto-meta {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.78rem;
+}
+.change-up { color: #4ade80; }
+.change-down { color: #f87171; }
+.rsi-oversold { color: #fb923c; font-weight: 600; }
+.rsi-normal { color: var(--text-secondary); }
+
+/* ── Signal Badge on Crypto Card ────────────────────────────────────────── */
+.signal-buy {
+    background: linear-gradient(135deg, #22c55e, #16a34a);
+    color: #fff;
+    font-size: 0.65rem;
+    font-weight: 700;
+    padding: 0.15rem 0.45rem;
+    border-radius: 4px;
+    letter-spacing: 0.05em;
+    animation: signalPulse 2s ease infinite;
+}
+@keyframes signalPulse {
+    0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(34,197,94,0.5); }
+    50%       { opacity: 0.85; box-shadow: 0 0 0 5px rgba(34,197,94,0); }
+}
+
+/* ── Trade Type Badges ──────────────────────────────────────────────────── */
+.badge {
+    display: inline-block;
+    padding: 0.18rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+}
+.badge-buy  { background: rgba(59,130,246,0.2); color: #60a5fa; }
+.badge-tp   { background: rgba(34,197,94,0.2); color: #4ade80; }
+.badge-sl   { background: rgba(248,113,113,0.2); color: #f87171; }
+.badge-time { background: rgba(245,158,11,0.2); color: #fbbf24; }
+
+/* ── Price update pulse animation ───────────────────────────────────────── */
+@keyframes priceUpdate {
+    0%   { background: rgba(245,158,11,0.25); }
+    100% { background: transparent; }
+}
+.price-updated {
+    animation: priceUpdate 1s ease-out;
+}

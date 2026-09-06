@@ -50,15 +50,23 @@ from config import (
     WEEKLY_CLOSE_TIME_EST,
     SUPERVISOR_POLL_INTERVAL_SEC,
     MARKET_REGIME_TICKER,
+    CRYPTO_MAX_POSITION_PCT,
 )
 from data.ingestion import DataClient
-from signals.indicators import compute_indicators, generate_signal, get_signal_summary
+from signals.indicators import (
+    compute_indicators, generate_signal, get_signal_summary,
+    compute_crypto_indicators, generate_crypto_signal,
+)
 from risk.kelly import compute_notional
 from execution.orders import OrderManager
 from execution.supervisor import PositionSupervisor
+from execution.crypto_orders import CryptoOrderManager
+from execution.crypto_supervisor import CryptoPositionSupervisor
 from scheduler.weekly_close import initialize as init_scheduler, setup_schedule, friday_liquidation
 from logging_.trade_log import TradeLogger
 from universe.screener import UniverseScreener
+from universe.crypto_screener import CryptoUniverseScreener
+from data.crypto_ingestion import CryptoDataClient
 
 # ─── Configuracion del sistema de logging ─────────────────────────────────────
 def _setup_logging() -> None:
@@ -413,6 +421,96 @@ async def run_daily_signals(
         logger.info("Ciclo completado: Sin señales de compra hoy.")
 
 
+# ─── Ciclo de señales cripto (independiente, 24/7) ───────────────────────────
+
+async def run_crypto_signals(
+    crypto_data_client: CryptoDataClient,
+    crypto_order_manager: CryptoOrderManager,
+    crypto_supervisor: CryptoPositionSupervisor,
+    trade_logger: TradeLogger,
+    crypto_screener: CryptoUniverseScreener,
+) -> None:
+    """
+    Ciclo de deteccion de señales cripto. Corre cada hora (mercado 24/7).
+    Completamente aislado del ciclo de equities.
+    """
+    logger.info("[CRYPTO] Iniciando ciclo de señales cripto...")
+    active_symbols = crypto_screener.get_active_universe()
+    logger.info(f"[CRYPTO] Universo activo: {active_symbols}")
+
+    equity = await asyncio.get_event_loop().run_in_executor(
+        None, crypto_order_manager.get_account_equity
+    )
+    notional, kelly_pct = compute_notional(
+        account_equity=equity,
+        p=KELLY_WIN_RATE,
+        b=KELLY_WIN_LOSS_RATIO,
+        max_pct=CRYPTO_MAX_POSITION_PCT,
+        kelly_multiplier=KELLY_FRACTION,
+    )
+
+    if notional <= 0:
+        logger.warning("[CRYPTO] Notional Kelly=0. Sin ordenes en este ciclo.")
+        return
+
+    data_dict = await asyncio.get_event_loop().run_in_executor(
+        None, crypto_data_client.get_historical_data, active_symbols
+    )
+
+    orders_placed = 0
+    for symbol in active_symbols:
+        if crypto_supervisor.is_position_active(symbol):
+            continue
+        if symbol not in data_dict:
+            logger.warning(f"[CRYPTO] {symbol}: Sin datos. Omitido.")
+            continue
+
+        df = compute_crypto_indicators(data_dict[symbol])
+        if not generate_crypto_signal(df):
+            continue
+
+        logger.info(f"[CRYPTO] {symbol}: SEÑAL DE COMPRA. Enviando orden...")
+        order = await asyncio.get_event_loop().run_in_executor(
+            None, crypto_order_manager.submit_buy, symbol, notional
+        )
+        if order is None:
+            continue
+
+        last = df.iloc[-1]
+        entry_price = float(last["close"])
+        atr_val = float(last["atr"]) if "atr" in df.columns and not pd.isna(last.get("atr", float("nan"))) else None
+        qty = notional / entry_price if entry_price > 0 else 0.0
+
+        trade_logger.log_crypto_entry({
+            "ticker": symbol,
+            "notional": notional,
+            "entry_price": entry_price,
+            "qty": qty,
+            "kelly_pct": kelly_pct,
+            "atr_at_entry": atr_val,
+        })
+
+        crypto_supervisor.add_position(
+            symbol=symbol,
+            entry_price=entry_price,
+            qty=qty,
+            notional=notional,
+            kelly_pct=kelly_pct,
+            atr_at_entry=atr_val,
+        )
+        orders_placed += 1
+        logger.info(
+            f"[CRYPTO] {symbol}: Orden enviada. ${notional:.2f} nocional | "
+            f"ATR: {atr_val:.4f if atr_val else 'N/A'}"
+        )
+
+    if orders_placed > 0:
+        crypto_supervisor.start()
+    logger.info(f"[CRYPTO] Ciclo cripto completado: {orders_placed} ordenes.")
+
+
+import pandas as pd  # noqa: E402 — importado aqui para evitar circular imports
+
 # ─── Loop principal del bot ───────────────────────────────────────────────────
 
 async def run_main_loop(
@@ -421,6 +519,10 @@ async def run_main_loop(
     supervisor: PositionSupervisor,
     trade_logger: TradeLogger,
     screener: UniverseScreener,
+    crypto_data_client: CryptoDataClient = None,
+    crypto_order_manager: CryptoOrderManager = None,
+    crypto_supervisor: CryptoPositionSupervisor = None,
+    crypto_screener: CryptoUniverseScreener = None,
 ) -> None:
     """
     Loop principal asincrono del bot.
@@ -452,11 +554,13 @@ async def run_main_loop(
 
     signals_run_today = False
     last_signal_date = None
+    last_crypto_hour = None   # Para ejecutar el ciclo cripto 1x por hora
 
     while True:
         try:
             now_est = datetime.now(EST)
             today = now_est.date()
+            current_hour = now_est.replace(minute=0, second=0, microsecond=0)
 
             # Ejecutar trabajos pendientes del scheduler (viernes 15:45)
             schedule.run_pending()
@@ -472,6 +576,20 @@ async def run_main_loop(
                         data_client, order_manager, supervisor, trade_logger, screener
                     )
                     last_signal_date = today
+
+            # ─── Ciclo de cripto: cada hora, 24/7 ────────────────────────────
+            if (
+                crypto_data_client is not None
+                and crypto_order_manager is not None
+                and crypto_supervisor is not None
+                and crypto_screener is not None
+                and last_crypto_hour != current_hour
+            ):
+                await run_crypto_signals(
+                    crypto_data_client, crypto_order_manager,
+                    crypto_supervisor, trade_logger, crypto_screener,
+                )
+                last_crypto_hour = current_hour
 
             # ─── Exportar CSV al fin de mes ────────────────────────────────────
             if _is_last_day_of_month() and now_est.hour == 16:
@@ -495,6 +613,7 @@ async def run_main_loop(
                 "Reintentando en 60 segundos..."
             )
             await asyncio.sleep(60)
+
 
 
 # ─── Entry Point ──────────────────────────────────────────────────────────────
@@ -555,6 +674,13 @@ Ejemplos de uso:
     supervisor = PositionSupervisor(order_manager, trade_logger)
     screener = UniverseScreener(api_key, secret_key)
 
+    # ─── Inicializar componentes de Cripto ────────────────────────────────────
+    crypto_order_manager = CryptoOrderManager(api_key, secret_key)
+    crypto_data_client = CryptoDataClient(api_key, secret_key)
+    crypto_supervisor = CryptoPositionSupervisor(crypto_order_manager, trade_logger)
+    crypto_screener = CryptoUniverseScreener()
+    logger.info("Modulo de criptomonedas inicializado (CoinGecko + Alpaca Crypto).")
+
     # Inyectar dependencias en el scheduler (incluyendo el screener)
     init_scheduler(order_manager, supervisor, trade_logger, screener)
     setup_schedule()
@@ -592,7 +718,13 @@ Ejemplos de uso:
         logger.info("Dashboard iniciado en http://localhost:8000")
 
         asyncio.run(
-            run_main_loop(order_manager, data_client, supervisor, trade_logger, screener)
+            run_main_loop(
+                order_manager, data_client, supervisor, trade_logger, screener,
+                crypto_data_client=crypto_data_client,
+                crypto_order_manager=crypto_order_manager,
+                crypto_supervisor=crypto_supervisor,
+                crypto_screener=crypto_screener,
+            )
         )
     except KeyboardInterrupt:
         logger.info("Bot detenido por el usuario.")

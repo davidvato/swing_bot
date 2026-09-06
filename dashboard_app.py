@@ -306,12 +306,112 @@ def get_chart_data(ticker: str, entry_price: float = None):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+# ─── Crypto Endpoints ─────────────────────────────────────────────────────────
+
+@app.get("/api/crypto/universe")
+def get_crypto_universe():
+    """
+    Returns the active crypto universe from CoinGecko screener cache.
+    Falls back to static CRYPTO_FALLBACK_TICKERS if cache doesn't exist.
+    """
+    import json
+    from pathlib import Path
+    cache_path = Path(config.CRYPTO_UNIVERSE_CACHE)
+    if cache_path.exists():
+        try:
+            payload = json.loads(cache_path.read_text(encoding="utf-8"))
+            payload["next_update"] = "Every Monday at 00:01 UTC (CoinGecko)"
+            return payload
+        except Exception:
+            pass
+    return {
+        "active_universe": config.CRYPTO_FALLBACK_TICKERS,
+        "scores": {},
+        "last_updated": None,
+        "source": "static_fallback",
+        "universe_size": len(config.CRYPTO_FALLBACK_TICKERS),
+        "next_update": "Every Monday at 00:01 UTC (CoinGecko)",
+    }
+
+
+@app.get("/api/crypto/prices")
+def get_crypto_prices():
+    """
+    Returns latest cached crypto prices (updated every hour by the bot).
+    Falls back to static universe with null prices if cache not ready.
+    """
+    import json
+    from pathlib import Path
+    cache_path = Path(config.CRYPTO_CACHE_FILE)
+    if cache_path.exists():
+        try:
+            return json.loads(cache_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return {
+        "prices": {sym: None for sym in config.CRYPTO_FALLBACK_TICKERS},
+        "last_updated": None,
+        "source": "cache_not_ready",
+    }
+
+
+@app.get("/api/crypto/trades")
+def get_crypto_trades():
+    """Returns the full crypto trade history from the crypto_trades table."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute(
+            f"SELECT * FROM {config.CRYPTO_DB_TABLE} ORDER BY date DESC"
+        )
+        rows = [dict(r) for r in cur.fetchall()]
+        conn.close()
+        return rows
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/crypto/metrics")
+def get_crypto_metrics():
+    """Returns isolated performance metrics for the crypto portfolio."""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute(
+            f"""
+            SELECT
+                COUNT(*) as total_trades,
+                SUM(pnl) as total_pnl,
+                SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) as winning_trades,
+                SUM(CASE WHEN pnl < 0 THEN 1 ELSE 0 END) as losing_trades
+            FROM {config.CRYPTO_DB_TABLE}
+            WHERE trade_type LIKE 'CRYPTO_SELL%' AND pnl IS NOT NULL
+            """
+        )
+        row = dict(cur.fetchone())
+        conn.close()
+        total = row.get("total_trades") or 0
+        wins = row.get("winning_trades") or 0
+        total_pnl = row.get("total_pnl") or 0.0
+        return {
+            "total_pnl": round(total_pnl, 4),
+            "win_rate": round(wins / total * 100, 2) if total > 0 else 0.0,
+            "winning_trades": wins,
+            "losing_trades": row.get("losing_trades") or 0,
+            "total_trades": total,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # Mount static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.get("/")
 def read_index():
     return FileResponse("static/index.html")
+
 
 if __name__ == "__main__":
     import uvicorn

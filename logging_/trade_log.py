@@ -34,7 +34,7 @@ from typing import Optional
 
 import pytz
 
-from config import DB_PATH, TIMEZONE_EST
+from config import DB_PATH, TIMEZONE_EST, CRYPTO_DB_TABLE
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +63,27 @@ CREATE INDEX IF NOT EXISTS idx_trades_date   ON trades (date);
 """
 CREATE_INDEX_TICKER_SQL = """
 CREATE INDEX IF NOT EXISTS idx_trades_ticker ON trades (ticker);
+"""
+
+# ─── Esquema SQL para Cripto (tabla separada, aislada de equities) ────────────
+CREATE_CRYPTO_TABLE_SQL = f"""
+CREATE TABLE IF NOT EXISTS {CRYPTO_DB_TABLE} (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    date        TEXT    NOT NULL,
+    ticker      TEXT    NOT NULL,
+    trade_type  TEXT    NOT NULL,
+    notional    REAL    NOT NULL,
+    entry_price REAL,
+    exit_price  REAL,
+    qty         REAL,
+    pnl         REAL,
+    pnl_pct     REAL,
+    kelly_pct   REAL,
+    atr_at_entry REAL
+);
+"""
+CREATE_CRYPTO_INDEX_SQL = f"""
+CREATE INDEX IF NOT EXISTS idx_crypto_date   ON {CRYPTO_DB_TABLE} (date);
 """
 
 # Columnas del CSV exportado para reporte SIC
@@ -103,11 +124,14 @@ class TradeLogger:
         logger.info(f"TradeLogger inicializado. Base de datos: {os.path.abspath(db_path)}")
 
     def _initialize_db(self) -> None:
-        """Crea la tabla y los indices si no existen."""
+        """Crea la tabla de equities y la tabla de cripto si no existen."""
         with self._get_connection() as conn:
             conn.execute(CREATE_TABLE_SQL)
             conn.execute(CREATE_INDEX_DATE_SQL)
             conn.execute(CREATE_INDEX_TICKER_SQL)
+            # Tabla aislada para cripto
+            conn.execute(CREATE_CRYPTO_TABLE_SQL)
+            conn.execute(CREATE_CRYPTO_INDEX_SQL)
             conn.commit()
 
     @contextmanager
@@ -392,3 +416,150 @@ class TradeLogger:
         self.notifier.send_message(msg)
         
         return summary
+
+    # ─── Metodos de Cripto ────────────────────────────────────────────────────
+
+    def log_crypto_entry(self, trade_data: dict) -> int:
+        """
+        Registra una compra de cripto en la tabla crypto_trades.
+
+        Args:
+            trade_data: Diccionario con ticker, notional, entry_price, qty,
+                        kelly_pct, atr_at_entry.
+
+        Returns:
+            ID de la fila insertada.
+        """
+        insert_sql = f"""
+        INSERT INTO {CRYPTO_DB_TABLE}
+            (date, ticker, trade_type, notional, entry_price, exit_price,
+             qty, pnl, pnl_pct, kelly_pct, atr_at_entry)
+        VALUES
+            (:date, :ticker, :trade_type, :notional, :entry_price, :exit_price,
+             :qty, :pnl, :pnl_pct, :kelly_pct, :atr_at_entry)
+        """
+        row = {
+            "date": self._now_est_str(),
+            "ticker": trade_data.get("ticker"),
+            "trade_type": "CRYPTO_BUY",
+            "notional": trade_data.get("notional"),
+            "entry_price": trade_data.get("entry_price"),
+            "exit_price": None,
+            "qty": trade_data.get("qty"),
+            "pnl": None,
+            "pnl_pct": None,
+            "kelly_pct": trade_data.get("kelly_pct"),
+            "atr_at_entry": trade_data.get("atr_at_entry"),
+        }
+        with self._get_connection() as conn:
+            cursor = conn.execute(insert_sql, row)
+            conn.commit()
+            row_id = cursor.lastrowid
+
+        logger.info(
+            f"[CRYPTO LOG] BUY: {row['ticker']} | "
+            f"${row['notional']:.2f} nocional | "
+            f"Precio: ${row['entry_price']:.4f} | "
+            f"ATR: {row['atr_at_entry']} | ID: {row_id}"
+        )
+
+        atr_str = f" | ATR: {row['atr_at_entry']:.4f}" if row["atr_at_entry"] else ""
+        msg = (
+            f"🟡 <b>CRYPTO COMPRA: {row['ticker']}</b>\n"
+            f"Nocional: ${row['notional']:.2f}\n"
+            f"Precio: ${row['entry_price']:.4f}\n"
+            f"Cant: {row['qty']:.8f}{atr_str}"
+        )
+        self.notifier.send_message(msg)
+        return row_id
+
+    def log_crypto_exit(self, trade_data: dict) -> int:
+        """
+        Registra una venta de cripto en la tabla crypto_trades.
+
+        Args:
+            trade_data: Diccionario con ticker, trade_type, notional,
+                        entry_price, exit_price, qty, pnl, pnl_pct,
+                        kelly_pct, atr_at_entry.
+
+        Returns:
+            ID de la fila insertada.
+        """
+        insert_sql = f"""
+        INSERT INTO {CRYPTO_DB_TABLE}
+            (date, ticker, trade_type, notional, entry_price, exit_price,
+             qty, pnl, pnl_pct, kelly_pct, atr_at_entry)
+        VALUES
+            (:date, :ticker, :trade_type, :notional, :entry_price, :exit_price,
+             :qty, :pnl, :pnl_pct, :kelly_pct, :atr_at_entry)
+        """
+        row = {
+            "date": self._now_est_str(),
+            "ticker": trade_data.get("ticker"),
+            "trade_type": trade_data.get("trade_type"),
+            "notional": trade_data.get("notional"),
+            "entry_price": trade_data.get("entry_price"),
+            "exit_price": trade_data.get("exit_price"),
+            "qty": trade_data.get("qty"),
+            "pnl": trade_data.get("pnl"),
+            "pnl_pct": trade_data.get("pnl_pct"),
+            "kelly_pct": trade_data.get("kelly_pct"),
+            "atr_at_entry": trade_data.get("atr_at_entry"),
+        }
+        with self._get_connection() as conn:
+            cursor = conn.execute(insert_sql, row)
+            conn.commit()
+            row_id = cursor.lastrowid
+
+        pnl = row["pnl"] or 0
+        pnl_pct = row["pnl_pct"] or 0
+        sign = "+" if pnl >= 0 else ""
+        emoji = "🔴" if pnl < 0 else "🟢"
+
+        logger.info(
+            f"[CRYPTO LOG] {row['trade_type']}: {row['ticker']} | "
+            f"P&L: {sign}${pnl:.4f} ({sign}{pnl_pct*100:.2f}%) | ID: {row_id}"
+        )
+
+        msg = (
+            f"{emoji} <b>CRYPTO VENTA: {row['ticker']}</b>\n"
+            f"Tipo: {row['trade_type']}\n"
+            f"P&L: {sign}${pnl:.4f} ({sign}{pnl_pct*100:.2f}%)\n"
+            f"Entrada: ${row['entry_price']:.4f}\n"
+            f"Salida: ${row['exit_price']:.4f}"
+        )
+        self.notifier.send_message(msg)
+        return row_id
+
+    def get_crypto_trades(self) -> list[dict]:
+        """Retorna todos los trades de cripto ordenados por fecha descendente."""
+        query = f"SELECT * FROM {CRYPTO_DB_TABLE} ORDER BY date DESC"
+        with self._get_connection() as conn:
+            cursor = conn.execute(query)
+            return [dict(r) for r in cursor.fetchall()]
+
+    def get_crypto_metrics(self) -> dict:
+        """Calcula metricas de rendimiento del portafolio cripto."""
+        query = f"""
+        SELECT
+            COUNT(*) as total_trades,
+            SUM(pnl) as total_pnl,
+            SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) as winning_trades,
+            SUM(CASE WHEN pnl < 0 THEN 1 ELSE 0 END) as losing_trades
+        FROM {CRYPTO_DB_TABLE}
+        WHERE trade_type LIKE 'CRYPTO_SELL%' AND pnl IS NOT NULL
+        """
+        with self._get_connection() as conn:
+            row = dict(conn.execute(query).fetchone())
+
+        total = row.get("total_trades") or 0
+        wins = row.get("winning_trades") or 0
+        total_pnl = row.get("total_pnl") or 0.0
+
+        return {
+            "total_pnl": round(total_pnl, 4),
+            "win_rate": round(wins / total * 100, 2) if total > 0 else 0.0,
+            "winning_trades": wins,
+            "losing_trades": row.get("losing_trades") or 0,
+            "total_trades": total,
+        }

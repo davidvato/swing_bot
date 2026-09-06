@@ -3,6 +3,12 @@ document.addEventListener('DOMContentLoaded', () => {
     fetchBudget();
     fetchMetrics();
     fetchTrades();
+    fetchCryptoUniverse();
+    fetchCryptoMetrics();
+    fetchCryptoPrices();
+    fetchCryptoTrades();
+    // Auto-refresh crypto prices every 60 seconds
+    setInterval(fetchCryptoPrices, 60000);
 });
 
 const formatCurrency = (val) => {
@@ -277,3 +283,172 @@ function closeChartModal() {
         currentChart = null;
     }
 }
+
+// ─── Tab Navigation ───────────────────────────────────────────────────────────
+
+function switchTab(tab) {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+    document.getElementById(`tab-${tab}`).classList.add('active');
+    document.getElementById(`pane-${tab}`).classList.add('active');
+}
+
+// ─── Crypto Universe Sidebar ──────────────────────────────────────────────────
+
+async function fetchCryptoUniverse() {
+    try {
+        const res = await fetch('/api/crypto/universe');
+        const data = await res.json();
+        const container = document.getElementById('crypto-tickers-container');
+        const meta = document.getElementById('crypto-universe-meta');
+        container.innerHTML = '';
+        (data.active_universe || []).forEach(sym => {
+            const tag = document.createElement('span');
+            tag.className = 'tag crypto-tag';
+            tag.textContent = sym.replace('/USD','');
+            container.appendChild(tag);
+        });
+        if (data.last_updated) {
+            meta.textContent = `Updated: ${new Date(data.last_updated).toLocaleDateString()}`;
+        } else {
+            meta.textContent = 'Fallback (CoinGecko pending)';
+        }
+    } catch (e) {
+        console.error('fetchCryptoUniverse error:', e);
+    }
+}
+
+// ─── Crypto KPIs ──────────────────────────────────────────────────────────────
+
+async function fetchCryptoMetrics() {
+    try {
+        const res = await fetch('/api/crypto/metrics');
+        const data = await res.json();
+        const pnl = data.total_pnl || 0;
+        const pnlEl = document.getElementById('crypto-kpi-pnl');
+        pnlEl.textContent = formatCurrency(pnl);
+        pnlEl.className = `kpi-value ${pnl >= 0 ? 'positive' : 'negative'}`;
+        document.getElementById('crypto-kpi-winrate').textContent = formatPercent(data.win_rate);
+        document.getElementById('crypto-winrate-details').textContent =
+            `W: ${data.winning_trades} | L: ${data.losing_trades}`;
+        document.getElementById('crypto-kpi-total').textContent = data.total_trades || 0;
+    } catch (e) {
+        console.error('fetchCryptoMetrics error:', e);
+    }
+}
+
+// ─── Crypto Price Grid ────────────────────────────────────────────────────────
+
+const CRYPTO_NAMES = {
+    'BTC/USD': 'Bitcoin', 'ETH/USD': 'Ethereum', 'BNB/USD': 'BNB',
+    'SOL/USD': 'Solana', 'XRP/USD': 'Ripple', 'DOGE/USD': 'Dogecoin',
+    'ADA/USD': 'Cardano', 'AVAX/USD': 'Avalanche', 'LINK/USD': 'Chainlink',
+    'DOT/USD': 'Polkadot', 'SHIB/USD': 'Shiba Inu', 'LTC/USD': 'Litecoin',
+    'UNI/USD': 'Uniswap', 'BCH/USD': 'Bitcoin Cash', 'XLM/USD': 'Stellar',
+};
+
+async function fetchCryptoPrices() {
+    try {
+        // Fetch universe to know which symbols to display
+        const uniRes = await fetch('/api/crypto/universe');
+        const uniData = await uniRes.json();
+        const symbols = uniData.active_universe || [];
+
+        // Fetch prices cache
+        const priceRes = await fetch('/api/crypto/prices');
+        const priceData = await priceRes.json();
+        const prices = priceData.prices || {};
+
+        const grid = document.getElementById('crypto-price-grid');
+        grid.innerHTML = '';
+
+        symbols.forEach(sym => {
+            const info = prices[sym] || {};
+            const price = info.price;
+            const change24h = info.change_24h;
+            const rsi = info.rsi;
+            const signal = info.signal;
+            const shortName = sym.replace('/USD', '');
+            const fullName = CRYPTO_NAMES[sym] || shortName;
+
+            const changeClass = change24h >= 0 ? 'change-up' : 'change-down';
+            const changeIcon = change24h >= 0 ? '▲' : '▼';
+            const signalBadge = signal
+                ? '<span class="signal-buy">BUY</span>'
+                : '';
+            const rsiColor = rsi !== null && rsi < 30 ? 'rsi-oversold' : 'rsi-normal';
+
+            const card = document.createElement('div');
+            card.className = 'crypto-price-card glass-panel';
+            card.innerHTML = `
+                <div class="crypto-card-header">
+                    <span class="crypto-symbol">${shortName}</span>
+                    ${signalBadge}
+                </div>
+                <div class="crypto-card-name">${fullName}</div>
+                <div class="crypto-price">${price !== null && price !== undefined ? formatCurrency(price) : '---'}</div>
+                <div class="crypto-meta">
+                    <span class="${changeClass}">
+                        ${change24h !== null && change24h !== undefined ? `${changeIcon} ${Math.abs(change24h).toFixed(2)}%` : '---'}
+                    </span>
+                    <span class="${rsiColor}">RSI: ${rsi !== null && rsi !== undefined ? rsi.toFixed(1) : '---'}</span>
+                </div>
+            `;
+            grid.appendChild(card);
+        });
+
+        // If no symbols yet show placeholder cards
+        if (symbols.length === 0) {
+            grid.innerHTML = '<p class="text-center" style="color:var(--text-muted);padding:2rem;">Crypto universe loading... (first run may take a few minutes)</p>';
+        }
+
+        const lastUpdate = document.getElementById('crypto-last-update');
+        if (priceData.last_updated) {
+            lastUpdate.textContent = `Updated: ${new Date(priceData.last_updated).toLocaleTimeString()}`;
+        } else {
+            lastUpdate.textContent = 'Pending first bot cycle...';
+        }
+    } catch (e) {
+        console.error('fetchCryptoPrices error:', e);
+    }
+}
+
+// ─── Crypto Trade History ─────────────────────────────────────────────────────
+
+async function fetchCryptoTrades() {
+    try {
+        const res = await fetch('/api/crypto/trades');
+        const trades = await res.json();
+        const tbody = document.getElementById('crypto-trades-tbody');
+        if (!trades || trades.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="9" class="text-center">No crypto trades yet.</td></tr>';
+            return;
+        }
+        tbody.innerHTML = trades.map(t => {
+            const pnl = t.pnl;
+            const isSell = t.trade_type && t.trade_type.includes('SELL');
+            const pnlClass = pnl === null ? '' : (pnl >= 0 ? 'positive' : 'negative');
+            const typeBadge = t.trade_type === 'CRYPTO_BUY'
+                ? '<span class="badge badge-buy">BUY</span>'
+                : t.trade_type === 'CRYPTO_SELL_TP'
+                    ? '<span class="badge badge-tp">TP</span>'
+                    : t.trade_type === 'CRYPTO_SELL_SL'
+                        ? '<span class="badge badge-sl">SL</span>'
+                        : `<span class="badge badge-time">${t.trade_type}</span>`;
+            return `<tr>
+                <td>${formatDate(t.date)}</td>
+                <td><strong>${t.ticker || '-'}</strong></td>
+                <td>${typeBadge}</td>
+                <td>${formatCurrency(t.notional)}</td>
+                <td>${t.entry_price ? '$' + parseFloat(t.entry_price).toFixed(4) : '-'}</td>
+                <td>${t.exit_price ? '$' + parseFloat(t.exit_price).toFixed(4) : '-'}</td>
+                <td>${t.atr_at_entry ? parseFloat(t.atr_at_entry).toFixed(4) : '-'}</td>
+                <td class="${pnlClass}">${pnl !== null ? formatCurrency(pnl) : '-'}</td>
+                <td class="${pnlClass}">${t.pnl_pct !== null ? (t.pnl_pct * 100).toFixed(2) + '%' : '-'}</td>
+            </tr>`;
+        }).join('');
+    } catch (e) {
+        console.error('fetchCryptoTrades error:', e);
+    }
+}
+

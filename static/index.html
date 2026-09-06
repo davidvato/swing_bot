@@ -21,68 +21,150 @@
             </div>
             
             <div class="market-universe">
-                <h3>Universe</h3>
+                <h3>Equity Universe</h3>
                 <div id="tickers-container" class="tags">
                     <!-- Tickers will be injected here -->
                 </div>
+            </div>
+
+            <div class="market-universe crypto-universe-sidebar">
+                <h3>₿ Crypto Universe</h3>
+                <div id="crypto-tickers-container" class="tags crypto-tags">
+                    <!-- Crypto tickers will be injected here -->
+                </div>
+                <p class="universe-meta" id="crypto-universe-meta"></p>
             </div>
         </aside>
 
         <!-- Main Dashboard -->
         <main class="dashboard-main">
             <header class="top-nav glass-panel">
-                <h1>Performance Overview</h1>
+                <!-- Tab Navigation -->
+                <div class="tab-nav">
+                    <button class="tab-btn active" id="tab-equities" onclick="switchTab('equities')">
+                        📈 Equities
+                    </button>
+                    <button class="tab-btn" id="tab-crypto" onclick="switchTab('crypto')">
+                        ₿ Crypto
+                    </button>
+                </div>
             </header>
 
-            <!-- KPI Cards -->
-            <section class="kpi-grid">
-                <div class="kpi-card glass-panel">
-                    <h3>Total Budget (Equity)</h3>
-                    <p class="kpi-value" id="kpi-equity">---</p>
-                    <span class="kpi-subtitle" id="equity-source">Loading...</span>
-                </div>
-                <div class="kpi-card glass-panel">
-                    <h3>Total PnL</h3>
-                    <p class="kpi-value" id="kpi-pnl">---</p>
-                </div>
-                <div class="kpi-card glass-panel">
-                    <h3>Win Rate</h3>
-                    <p class="kpi-value" id="kpi-winrate">---</p>
-                    <span class="kpi-subtitle" id="winrate-details">W: 0 | L: 0</span>
-                </div>
-                <div class="kpi-card glass-panel">
-                    <h3>Buying Power</h3>
-                    <p class="kpi-value" id="kpi-buyingpower">---</p>
-                </div>
-            </section>
+            <!-- ══════════════ EQUITIES TAB ══════════════ -->
+            <div id="pane-equities" class="tab-pane active">
+                <!-- KPI Cards -->
+                <section class="kpi-grid">
+                    <div class="kpi-card glass-panel">
+                        <h3>Total Budget (Equity)</h3>
+                        <p class="kpi-value" id="kpi-equity">---</p>
+                        <span class="kpi-subtitle" id="equity-source">Loading...</span>
+                    </div>
+                    <div class="kpi-card glass-panel">
+                        <h3>Total PnL</h3>
+                        <p class="kpi-value" id="kpi-pnl">---</p>
+                    </div>
+                    <div class="kpi-card glass-panel">
+                        <h3>Win Rate</h3>
+                        <p class="kpi-value" id="kpi-winrate">---</p>
+                        <span class="kpi-subtitle" id="winrate-details">W: 0 | L: 0</span>
+                    </div>
+                    <div class="kpi-card glass-panel">
+                        <h3>Buying Power</h3>
+                        <p class="kpi-value" id="kpi-buyingpower">---</p>
+                    </div>
+                </section>
 
-            <!-- Trade History Table -->
-            <section class="trades-section glass-panel">
-                <h2>Trade History</h2>
-                <div class="table-responsive">
-                    <table class="modern-table">
-                        <thead>
-                            <tr>
-                                <th>Entry Date</th>
-                                <th>Exit Date</th>
-                                <th>Ticker</th>
-                                <th>Result</th>
-                                <th>Entry $</th>
-                                <th>Exit $</th>
-                                <th>Qty</th>
-                                <th>Duration</th>
-                                <th>P&amp;L</th>
-                                <th>P&amp;L %</th>
-                            </tr>
-                        </thead>
-                        <tbody id="trades-tbody">
-                            <tr>
-                                <td colspan="10" class="text-center">Loading trades...</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-            </section>
+                <!-- Trade History Table -->
+                <section class="trades-section glass-panel">
+                    <h2>Trade History</h2>
+                    <div class="table-responsive">
+                        <table class="modern-table">
+                            <thead>
+                                <tr>
+                                    <th>Entry Date</th>
+                                    <th>Exit Date</th>
+                                    <th>Ticker</th>
+                                    <th>Result</th>
+                                    <th>Entry $</th>
+                                    <th>Exit $</th>
+                                    <th>Qty</th>
+                                    <th>Duration</th>
+                                    <th>P&amp;L</th>
+                                    <th>P&amp;L %</th>
+                                </tr>
+                            </thead>
+                            <tbody id="trades-tbody">
+                                <tr>
+                                    <td colspan="10" class="text-center">Loading trades...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+
+            <!-- ══════════════ CRYPTO TAB ══════════════ -->
+            <div id="pane-crypto" class="tab-pane">
+                <!-- Crypto KPI Cards -->
+                <section class="kpi-grid">
+                    <div class="kpi-card glass-panel crypto-card">
+                        <h3>Crypto P&amp;L</h3>
+                        <p class="kpi-value" id="crypto-kpi-pnl">---</p>
+                    </div>
+                    <div class="kpi-card glass-panel crypto-card">
+                        <h3>Crypto Win Rate</h3>
+                        <p class="kpi-value" id="crypto-kpi-winrate">---</p>
+                        <span class="kpi-subtitle" id="crypto-winrate-details">W: 0 | L: 0</span>
+                    </div>
+                    <div class="kpi-card glass-panel crypto-card">
+                        <h3>Total Trades</h3>
+                        <p class="kpi-value" id="crypto-kpi-total">---</p>
+                    </div>
+                    <div class="kpi-card glass-panel crypto-card">
+                        <h3>TP/SL Mode</h3>
+                        <p class="kpi-value crypto-atr-badge">ATR Dynamic</p>
+                        <span class="kpi-subtitle">R:R 2:1 (ATR-14)</span>
+                    </div>
+                </section>
+
+                <!-- Crypto Price Grid -->
+                <section class="crypto-prices-section glass-panel">
+                    <div class="section-header">
+                        <h2>₿ Live Crypto Prices</h2>
+                        <span class="update-badge" id="crypto-last-update">Updating...</span>
+                    </div>
+                    <div id="crypto-price-grid" class="crypto-price-grid">
+                        <!-- Cards injected by JS -->
+                    </div>
+                </section>
+
+                <!-- Crypto Trade History -->
+                <section class="trades-section glass-panel">
+                    <h2>Crypto Trade History</h2>
+                    <div class="table-responsive">
+                        <table class="modern-table">
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th>Pair</th>
+                                    <th>Type</th>
+                                    <th>Notional</th>
+                                    <th>Entry $</th>
+                                    <th>Exit $</th>
+                                    <th>ATR</th>
+                                    <th>P&amp;L</th>
+                                    <th>P&amp;L %</th>
+                                </tr>
+                            </thead>
+                            <tbody id="crypto-trades-tbody">
+                                <tr>
+                                    <td colspan="9" class="text-center">No crypto trades yet.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
         </main>
     </div>
 
@@ -98,6 +180,6 @@
         </div>
     </div>
 
-    <script src="/static/app.js?v=3"></script>
+    <script src="/static/app.js?v=4"></script>
 </body>
 </html>
