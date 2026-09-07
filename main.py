@@ -458,14 +458,32 @@ async def run_crypto_signals(
     )
 
     orders_placed = 0
+    cache_prices = {}
+
     for symbol in active_symbols:
-        if crypto_supervisor.is_position_active(symbol):
-            continue
         if symbol not in data_dict:
             logger.warning(f"[CRYPTO] {symbol}: Sin datos. Omitido.")
             continue
 
         df = compute_crypto_indicators(data_dict[symbol])
+        
+        # Guardar datos en el cache de precios para el Dashboard
+        if len(df) > 0:
+            last = df.iloc[-1]
+            prev = df.iloc[-2] if len(df) > 1 else last
+            pct_change = 0.0
+            if prev["close"] > 0:
+                pct_change = ((last["close"] - prev["close"]) / prev["close"]) * 100
+                
+            cache_prices[symbol] = {
+                "price": float(last["close"]),
+                "rsi": float(last["rsi"]) if "rsi" in df.columns and not pd.isna(last.get("rsi", float("nan"))) else None,
+                "pct_change": float(pct_change)
+            }
+
+        if crypto_supervisor.is_position_active(symbol):
+            continue
+
         if not generate_crypto_signal(df):
             continue
 
@@ -476,7 +494,6 @@ async def run_crypto_signals(
         if order is None:
             continue
 
-        last = df.iloc[-1]
         entry_price = float(last["close"])
         atr_val = float(last["atr"]) if "atr" in df.columns and not pd.isna(last.get("atr", float("nan"))) else None
         qty = notional / entry_price if entry_price > 0 else 0.0
@@ -506,6 +523,23 @@ async def run_crypto_signals(
 
     if orders_placed > 0:
         crypto_supervisor.start()
+
+    # --- Persistir Cache de Precios ---
+    try:
+        import json
+        from pathlib import Path
+        from datetime import timezone
+        from config import CRYPTO_CACHE_FILE
+        payload = {
+            "prices": cache_prices,
+            "last_updated": datetime.now(timezone.utc).isoformat(),
+            "source": "bot_crypto_cycle"
+        }
+        Path(CRYPTO_CACHE_FILE).write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        logger.info(f"[CRYPTO] Cache de precios guardado: {len(cache_prices)} pares.")
+    except Exception as exc:
+        logger.error(f"[CRYPTO] Error guardando cache de precios: {exc}")
+
     logger.info(f"[CRYPTO] Ciclo cripto completado: {orders_placed} ordenes.")
 
 
