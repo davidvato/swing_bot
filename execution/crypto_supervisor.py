@@ -249,13 +249,14 @@ class CryptoPositionSupervisor:
     ) -> None:
         """Ejecuta la venta y registra la operacion en el trade log."""
         symbol = record.symbol
+        success = False
         try:
             order = await asyncio.get_event_loop().run_in_executor(
                 None, self._order_manager.submit_sell, symbol, record.qty
             )
 
             if order is None:
-                logger.error(f"[CRYPTO {symbol}] Orden de venta retorno None.")
+                logger.error(f"[CRYPTO {symbol}] Orden de venta retorno None. Manteniendo posicion.")
                 return
 
             pnl = (exit_price - record.entry_price) * record.qty
@@ -282,12 +283,14 @@ class CryptoPositionSupervisor:
                 f"P&L={pnl_sign}${pnl:.4f} ({pnl_sign}{pnl_pct*100:.2f}%) | "
                 f"Precio=${exit_price:.4f}"
             )
+            success = True
 
         except Exception as exc:
             logger.error(f"[CRYPTO {symbol}] Error ejecutando salida: {exc}")
         finally:
-            async with self._lock:
-                self._positions.pop(symbol, None)
+            if success:
+                async with self._lock:
+                    self._positions.pop(symbol, None)
 
     def start(self) -> None:
         """Lanza corutinas de supervision para todas las posiciones registradas."""

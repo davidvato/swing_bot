@@ -279,6 +279,7 @@ class PositionSupervisor:
             exit_type: Tipo de salida (SELL_TP, SELL_SL, SELL_5D).
         """
         symbol = record.symbol
+        success = False
         try:
             # Ejecutar venta en hilo separado (operacion bloqueante)
             order = await asyncio.get_event_loop().run_in_executor(
@@ -291,7 +292,7 @@ class PositionSupervisor:
             if order is None:
                 logger.error(
                     f"[{symbol}] Orden de venta retorno None. "
-                    "Verificar estado de posicion manualmente."
+                    "Manteniendo posicion."
                 )
                 return
 
@@ -319,15 +320,17 @@ class PositionSupervisor:
                 f"P&L=${pnl:+.2f} ({pnl_pct*100:+.2f}%) | "
                 f"Precio salida=${exit_price:.2f}"
             )
+            success = True
 
         except Exception as exc:
             logger.error(
                 f"[{symbol}] Error ejecutando salida [{exit_type}]: {exc}"
             )
         finally:
-            # Remover la posicion del registro interno
-            async with self._lock:
-                self._positions.pop(symbol, None)
+            # Remover la posicion del registro interno solo si la orden fue un exito
+            if success:
+                async with self._lock:
+                    self._positions.pop(symbol, None)
 
     def start(self) -> None:
         """
