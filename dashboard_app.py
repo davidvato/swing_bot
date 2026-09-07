@@ -228,6 +228,17 @@ def get_trades():
         except Exception as e:
             print(f"Error fetching live P&L for equities: {e}")
 
+        # Compute Target TP and SL
+        import config
+        for t in paired:
+            ep = t.get("entry_price")
+            if ep:
+                t["target_tp"] = ep * (1 + config.TAKE_PROFIT_PCT)
+                t["target_sl"] = ep * (1 - config.STOP_LOSS_PCT)
+            else:
+                t["target_tp"] = None
+                t["target_sl"] = None
+
         # Sort: OPEN first (newest entry first), then CLOSED by exit_date DESC
         open_trades = sorted(
             [t for t in paired if t["status"] == "OPEN"],
@@ -484,7 +495,23 @@ def get_crypto_trades():
             reverse=True,
         )
 
-        return open_trades + closed_trades
+        all_trades = open_trades + closed_trades
+        import config
+        for t in all_trades:
+            ep = t.get("entry_price")
+            atr = t.get("atr_at_entry")
+            if ep:
+                if atr and atr > 0:
+                    t["target_tp"] = ep + (atr * config.CRYPTO_ATR_TP_MULT)
+                    t["target_sl"] = ep - (atr * config.CRYPTO_ATR_SL_MULT)
+                else:
+                    t["target_tp"] = ep * (1 + config.CRYPTO_TAKE_PROFIT_PCT)
+                    t["target_sl"] = ep * (1 - config.CRYPTO_STOP_LOSS_PCT)
+            else:
+                t["target_tp"] = None
+                t["target_sl"] = None
+
+        return all_trades
 
     except Exception as e:
         import traceback

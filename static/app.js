@@ -167,6 +167,8 @@ async function fetchTrades() {
                     <td><span class="${badgeClass}">${badgeLabel}</span></td>
                     <td>${formatCurrency(trade.entry_price)}</td>
                     <td>${formatCurrency(trade.exit_price)}</td>
+                    <td class="text-green">${trade.target_tp ? formatCurrency(trade.target_tp) : '-'}</td>
+                    <td class="text-red">${trade.target_sl ? formatCurrency(trade.target_sl) : '-'}</td>
                     <td class="mono">${(trade.qty || 0).toFixed(4)}</td>
                     <td class="mono">${durHTML}</td>
                     <td>${pnlHTML}</td>
@@ -181,6 +183,8 @@ async function fetchTrades() {
                     <td><span class="${badgeClass}">${badgeLabel}</span></td>
                     <td>${formatCurrency(trade.entry_price)}</td>
                     <td><span class="muted">—</span></td>
+                    <td class="text-green">${trade.target_tp ? formatCurrency(trade.target_tp) : '-'}</td>
+                    <td class="text-red">${trade.target_sl ? formatCurrency(trade.target_sl) : '-'}</td>
                     <td class="mono">${(trade.qty || 0).toFixed(4)}</td>
                     <td class="mono"><span class="muted">—</span></td>
                     <td>${pnlHTML}</td>
@@ -517,6 +521,8 @@ async function fetchCryptoTrades() {
                     <td>${formatCurrency(t.notional)}</td>
                     <td>${t.entry_price ? '$' + parseFloat(t.entry_price).toFixed(4) : '-'}</td>
                     <td>${t.exit_price ? '$' + parseFloat(t.exit_price).toFixed(4) : '-'}</td>
+                    <td class="text-green">${t.target_tp ? '$' + parseFloat(t.target_tp).toFixed(4) : '-'}</td>
+                    <td class="text-red">${t.target_sl ? '$' + parseFloat(t.target_sl).toFixed(4) : '-'}</td>
                     <td>${t.atr_at_entry ? parseFloat(t.atr_at_entry).toFixed(4) : '-'}</td>
                     <td class="${pnlClass}">${pnl !== null ? formatCurrency(pnl) : '-'}</td>
                     <td class="${pnlClass}">${t.pnl_pct !== null ? (t.pnl_pct * 100).toFixed(2) + '%' : '-'}</td>
@@ -534,6 +540,8 @@ async function fetchCryptoTrades() {
                     <td>${formatCurrency(t.notional)}</td>
                     <td>${t.entry_price ? '$' + parseFloat(t.entry_price).toFixed(4) : '-'}</td>
                     <td><span class="muted">—</span></td>
+                    <td class="text-green">${t.target_tp ? '$' + parseFloat(t.target_tp).toFixed(4) : '-'}</td>
+                    <td class="text-red">${t.target_sl ? '$' + parseFloat(t.target_sl).toFixed(4) : '-'}</td>
                     <td>${t.atr_at_entry ? parseFloat(t.atr_at_entry).toFixed(4) : '-'}</td>
                     <td class="${pnlClass}">${pnl !== null ? formatCurrency(pnl) : '-'}</td>
                     <td class="${pnlClass}">${t.pnl_pct !== null ? (t.pnl_pct * 100).toFixed(2) + '%' : '-'}</td>
