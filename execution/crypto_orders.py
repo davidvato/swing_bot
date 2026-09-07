@@ -70,7 +70,7 @@ class CryptoOrderManager:
                 symbol=alpaca_symbol,
                 notional=round(notional, 2),
                 side=OrderSide.BUY,
-                time_in_force=TimeInForce.IOC,  # Immediate-Or-Cancel para cripto
+                time_in_force=TimeInForce.GTC,
             )
             order = self._client.submit_order(request)
             logger.info(
@@ -99,7 +99,7 @@ class CryptoOrderManager:
                 symbol=alpaca_symbol,
                 qty=round(qty, 8),   # Cripto admite hasta 8 decimales
                 side=OrderSide.SELL,
-                time_in_force=TimeInForce.IOC,
+                time_in_force=TimeInForce.GTC,
             )
             order = self._client.submit_order(request)
             logger.info(
