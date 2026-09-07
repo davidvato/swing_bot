@@ -310,6 +310,7 @@ class PositionSupervisor:
                 "pnl": round(pnl, 4),
                 "pnl_pct": round(pnl_pct, 6),
                 "kelly_pct": record.kelly_pct,
+                "entry_time": record.entry_date.strftime("%Y-%m-%d") if record.entry_date else "N/A",
             }
             self._trade_logger.log_exit(trade_data)
 

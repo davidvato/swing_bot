@@ -202,11 +202,18 @@ class TradeLogger:
             f"ID: {row_id}"
         )
         
+        # Calculate SL/TP
+        import config
+        tp = row['entry_price'] * (1 + config.TAKE_PROFIT_PCT)
+        sl = row['entry_price'] * (1 - config.STOP_LOSS_PCT)
+
         # Send Telegram notification
         msg = (
             f"🟢 <b>NUEVA COMPRA: {row['ticker']}</b>\n"
-            f"Nocional: ${row['notional']:.2f}\n"
-            f"Precio: ${row['entry_price']:.2f}\n"
+            f"Budget: ${row['notional']:.2f}\n"
+            f"Precio del activo: ${row['entry_price']:.2f}\n"
+            f"SL/TP: ${sl:.2f} / ${tp:.2f}\n"
+            f"Hora de entrada: {row['date']}\n"
             f"Cant: {row['qty']:.4f}"
         )
         self.notifier.send_message(msg)
@@ -260,12 +267,15 @@ class TradeLogger:
         
         # Send Telegram notification
         emoji = "🔴" if row['pnl'] < 0 else "🟢"
+        entry_time = trade_data.get("entry_time", "N/A")
         msg = (
             f"{emoji} <b>VENTA CERRADA: {row['ticker']}</b>\n"
-            f"Tipo: {row['trade_type']}\n"
-            f"P&L: {pnl_symbol}${row['pnl']:.2f} ({pnl_symbol}{(row['pnl_pct'] or 0)*100:.2f}%)\n"
+            f"Cierre por: {row['trade_type']}\n"
+            f"Budget: ${row['notional']:.2f}\n"
+            f"Hora de entrada: {entry_time}\n"
             f"Precio Entrada: ${row['entry_price']:.2f}\n"
-            f"Precio Salida: ${row['exit_price']:.2f}"
+            f"Precio Salida: ${row['exit_price']:.2f}\n"
+            f"P&L: {pnl_symbol}${row['pnl']:.2f} ({pnl_symbol}{(row['pnl_pct'] or 0)*100:.2f}%)"
         )
         self.notifier.send_message(msg)
         
@@ -463,12 +473,21 @@ class TradeLogger:
             f"ATR: {row['atr_at_entry']} | ID: {row_id}"
         )
 
-        atr_str = f" | ATR: {row['atr_at_entry']:.4f}" if row["atr_at_entry"] else ""
+        import config
+        if row.get("atr_at_entry"):
+            tp = row['entry_price'] + (row['atr_at_entry'] * config.CRYPTO_ATR_TP_MULT)
+            sl = row['entry_price'] - (row['atr_at_entry'] * config.CRYPTO_ATR_SL_MULT)
+        else:
+            tp = row['entry_price'] * (1 + config.CRYPTO_TAKE_PROFIT_PCT)
+            sl = row['entry_price'] * (1 - config.CRYPTO_STOP_LOSS_PCT)
+
         msg = (
             f"🟡 <b>CRYPTO COMPRA: {row['ticker']}</b>\n"
-            f"Nocional: ${row['notional']:.2f}\n"
-            f"Precio: ${row['entry_price']:.4f}\n"
-            f"Cant: {row['qty']:.8f}{atr_str}"
+            f"Budget: ${row['notional']:.2f}\n"
+            f"Precio del activo: ${row['entry_price']:.4f}\n"
+            f"SL/TP: ${sl:.4f} / ${tp:.4f}\n"
+            f"Hora de entrada: {row['date']}\n"
+            f"Cant: {row['qty']:.8f}"
         )
         self.notifier.send_message(msg)
         return row_id
@@ -521,12 +540,15 @@ class TradeLogger:
             f"P&L: {sign}${pnl:.4f} ({sign}{pnl_pct*100:.2f}%) | ID: {row_id}"
         )
 
+        entry_time = trade_data.get("entry_time", "N/A")
         msg = (
             f"{emoji} <b>CRYPTO VENTA: {row['ticker']}</b>\n"
-            f"Tipo: {row['trade_type']}\n"
-            f"P&L: {sign}${pnl:.4f} ({sign}{pnl_pct*100:.2f}%)\n"
-            f"Entrada: ${row['entry_price']:.4f}\n"
-            f"Salida: ${row['exit_price']:.4f}"
+            f"Cierre por: {row['trade_type']}\n"
+            f"Budget: ${row['notional']:.2f}\n"
+            f"Hora de entrada: {entry_time}\n"
+            f"Precio Entrada: ${row['entry_price']:.4f}\n"
+            f"Precio Salida: ${row['exit_price']:.4f}\n"
+            f"P&L: {sign}${pnl:.4f} ({sign}{pnl_pct*100:.2f}%)"
         )
         self.notifier.send_message(msg)
         return row_id

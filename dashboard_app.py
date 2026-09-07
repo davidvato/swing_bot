@@ -358,11 +358,15 @@ def get_crypto_prices():
 
 @app.get("/api/crypto/trades")
 def get_crypto_trades():
-    """Returns the full crypto trade history from the crypto_trades table, grouped into OPEN and CLOSED."""
+    """Returns the crypto trade history: CLOSED from DB, OPEN from Alpaca directly."""
     try:
         from collections import defaultdict, deque
         from datetime import datetime as _dt
+        import pytz
+        import os
+        from alpaca.trading.client import TradingClient
 
+        # 1. Fetch CLOSED trades from local database
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute(f"SELECT * FROM {config.CRYPTO_DB_TABLE} ORDER BY date ASC, id ASC")
@@ -403,37 +407,68 @@ def get_crypto_trades():
                         "duration_days": duration_days,
                     })
 
-        for ticker, buy_queue in pending_buys.items():
-            for buy in buy_queue:
-                paired.append({
-                    "status": "OPEN",
-                    "ticker": ticker,
-                    "sell_type": None,
-                    "entry_date": buy["date"],
-                    "exit_date": None,
-                    "entry_price": buy["entry_price"],
-                    "exit_price": None,
-                    "qty": buy["qty"],
-                    "notional": buy["notional"],
-                    "pnl": None,
-                    "pnl_pct": None,
-                    "atr_at_entry": buy.get("atr_at_entry"),
-                    "duration_days": None,
-                })
-
-        open_trades = sorted(
-            [t for t in paired if t["status"] == "OPEN"],
-            key=lambda x: x["entry_date"],
-            reverse=True,
-        )
         closed_trades = sorted(
             [t for t in paired if t["status"] == "CLOSED"],
             key=lambda x: x["exit_date"],
             reverse=True,
         )
+
+        # 2. Fetch OPEN trades directly from Alpaca (source of truth)
+        open_trades = []
+        API_KEY = os.getenv("ALPACA_API_KEY")
+        SECRET_KEY = os.getenv("ALPACA_SECRET_KEY")
+        
+        if API_KEY and SECRET_KEY:
+            # Check PAPER based on environment or default to True
+            is_paper = str(os.getenv("ALPACA_PAPER", "True")).lower() == "true"
+            client = TradingClient(API_KEY, SECRET_KEY, paper=is_paper)
+            try:
+                positions = client.get_all_positions()
+                for p in positions:
+                    if p.asset_class == 'crypto':
+                        entry_price = float(p.avg_entry_price) if p.avg_entry_price else 0.0
+                        unrealized_pl = float(p.unrealized_pl) if p.unrealized_pl else 0.0
+                        unrealized_plpc = float(p.unrealized_plpc) if p.unrealized_plpc else 0.0
+                        market_value = float(p.market_value) if p.market_value else 0.0
+                        qty = float(p.qty) if p.qty else 0.0
+                        
+                        # Try to match with an entry date from our DB if we have a stale pending_buy
+                        entry_date = _dt.now(pytz.timezone(config.TIMEZONE_EST)).strftime("%Y-%m-%d %H:%M:%S EST")
+                        atr = None
+                        if pending_buys[p.symbol]:
+                            buy_record = pending_buys[p.symbol][-1]
+                            entry_date = buy_record.get("date", entry_date)
+                            atr = buy_record.get("atr_at_entry")
+
+                        open_trades.append({
+                            "status": "OPEN",
+                            "ticker": p.symbol,
+                            "sell_type": None,
+                            "entry_date": entry_date,
+                            "exit_date": None,
+                            "entry_price": entry_price,
+                            "exit_price": None,
+                            "qty": qty,
+                            "notional": market_value,
+                            "pnl": unrealized_pl,
+                            "pnl_pct": unrealized_plpc,
+                            "atr_at_entry": atr,
+                            "duration_days": None,
+                        })
+            except Exception as e:
+                print(f"Error fetching Alpaca positions: {e}")
+
+        open_trades = sorted(
+            open_trades,
+            key=lambda x: x["entry_date"],
+            reverse=True,
+        )
+
         return open_trades + closed_trades
 
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 

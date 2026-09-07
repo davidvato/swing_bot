@@ -272,6 +272,7 @@ class CryptoPositionSupervisor:
                 "pnl_pct": round(pnl_pct, 6),
                 "kelly_pct": record.kelly_pct,
                 "atr_at_entry": record.atr_at_entry,
+                "entry_time": record.entry_time.strftime("%Y-%m-%d %H:%M:%S") if record.entry_time else "N/A",
             }
             self._trade_logger.log_crypto_exit(trade_data)
 
