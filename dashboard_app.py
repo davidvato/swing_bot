@@ -229,7 +229,6 @@ def get_trades():
             print(f"Error fetching live P&L for equities: {e}")
 
         # Compute Target TP and SL
-        import config
         for t in paired:
             ep = t.get("entry_price")
             if ep:
@@ -496,7 +495,6 @@ def get_crypto_trades():
         )
 
         all_trades = open_trades + closed_trades
-        import config
         for t in all_trades:
             ep = t.get("entry_price")
             atr = t.get("atr_at_entry")
