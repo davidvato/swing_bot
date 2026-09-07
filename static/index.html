@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -83,7 +83,29 @@
                 </section>
 
                 <section class="trades-section glass-panel">
-                    <h2>Trade History</h2>
+                    <h2>Open Positions</h2>
+                    <div class="table-responsive" style="margin-bottom: 2rem;">
+                        <table class="modern-table">
+                            <thead>
+                                <tr>
+                                    <th>Entry Date</th>
+                                    <th>Ticker</th>
+                                    <th>Result</th>
+                                    <th>Entry $</th>
+                                    <th>Exit $</th>
+                                    <th>Qty</th>
+                                    <th>Duration</th>
+                                    <th>P&amp;L</th>
+                                    <th>P&amp;L %</th>
+                                </tr>
+                            </thead>
+                            <tbody id="trades-open-tbody">
+                                <tr><td colspan="9" class="text-center">Loading open positions...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <h2>Closed History</h2>
                     <div class="table-responsive">
                         <table class="modern-table">
                             <thead>
@@ -100,8 +122,8 @@
                                     <th>P&amp;L %</th>
                                 </tr>
                             </thead>
-                            <tbody id="trades-tbody">
-                                <tr><td colspan="10" class="text-center">Loading trades...</td></tr>
+                            <tbody id="trades-closed-tbody">
+                                <tr><td colspan="10" class="text-center">Loading trade history...</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -141,13 +163,13 @@
                 </section>
 
                 <section class="trades-section glass-panel">
-                    <h2>Crypto Trade History</h2>
+                    <h2>Crypto Open Positions</h2>
                     <p class="crypto-chart-hint">&#x1F4A1; Click any row to open the chart</p>
-                    <div class="table-responsive">
+                    <div class="table-responsive" style="margin-bottom: 2rem;">
                         <table class="modern-table">
                             <thead>
                                 <tr>
-                                    <th>Date</th>
+                                    <th>Entry Date</th>
                                     <th>Pair</th>
                                     <th>Type</th>
                                     <th>Notional</th>
@@ -158,8 +180,32 @@
                                     <th>P&amp;L %</th>
                                 </tr>
                             </thead>
-                            <tbody id="crypto-trades-tbody">
-                                <tr><td colspan="9" class="text-center">No crypto trades yet.</td></tr>
+                            <tbody id="crypto-trades-open-tbody">
+                                <tr><td colspan="9" class="text-center">Loading crypto open positions...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <h2>Crypto Closed History</h2>
+                    <p class="crypto-chart-hint">&#x1F4A1; Click any row to open the chart</p>
+                    <div class="table-responsive">
+                        <table class="modern-table">
+                            <thead>
+                                <tr>
+                                    <th>Entry Date</th>
+                                    <th>Exit Date</th>
+                                    <th>Pair</th>
+                                    <th>Type</th>
+                                    <th>Notional</th>
+                                    <th>Entry $</th>
+                                    <th>Exit $</th>
+                                    <th>ATR</th>
+                                    <th>P&amp;L</th>
+                                    <th>P&amp;L %</th>
+                                </tr>
+                            </thead>
+                            <tbody id="crypto-trades-closed-tbody">
+                                <tr><td colspan="10" class="text-center">Loading crypto trade history...</td></tr>
                             </tbody>
                         </table>
                     </div>

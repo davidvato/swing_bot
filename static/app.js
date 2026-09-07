@@ -102,19 +102,24 @@ async function fetchTrades() {
         const res = await fetch('/api/trades');
         const groups = await res.json();
 
-        const tbody = document.getElementById('trades-tbody');
-        tbody.innerHTML = '';
+        const openTbody = document.getElementById('trades-open-tbody');
+        const closedTbody = document.getElementById('trades-closed-tbody');
+        openTbody.innerHTML = '';
+        closedTbody.innerHTML = '';
 
         if (groups.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="10" class="text-center">No trades found.</td></tr>';
+            openTbody.innerHTML = '<tr><td colspan="9" class="text-center">No open positions.</td></tr>';
+            closedTbody.innerHTML = '<tr><td colspan="10" class="text-center">No closed trades found.</td></tr>';
             return;
         }
+
+        let openCount = 0;
+        let closedCount = 0;
 
         groups.forEach(trade => {
             const tr = document.createElement('tr');
             const isClosed = trade.status === 'CLOSED';
 
-            // ── Status badge ────────────────────────────────────────────────
             let badgeClass, badgeLabel;
             if (!isClosed) {
                 badgeClass = 'trade-type buy';
@@ -128,7 +133,6 @@ async function fetchTrades() {
                 else                         { badgeClass = 'trade-type sell';    badgeLabel = trade.sell_type || 'CLOSED'; }
             }
 
-            // ── P&L ─────────────────────────────────────────────────────────
             let pnlHTML    = '<span class="muted">—</span>';
             let pnlPctHTML = '<span class="muted">—</span>';
             if (trade.pnl !== null && trade.pnl !== undefined) {
@@ -137,17 +141,14 @@ async function fetchTrades() {
                 pnlPctHTML = `<span class="${c}">${formatPercent((trade.pnl_pct || 0) * 100)}</span>`;
             }
 
-            // ── Duration ────────────────────────────────────────────────────
             const durHTML = (trade.duration_days !== null && trade.duration_days !== undefined)
                 ? `${trade.duration_days}d`
                 : '<span class="muted">—</span>';
 
-            // ── Exit date ───────────────────────────────────────────────────
             const exitDateHTML = trade.exit_date
                 ? trade.exit_date
                 : '<span class="muted">in progress…</span>';
 
-            // ── Row click ───────────────────────────────────────────────────
             const chartPrice = isClosed ? trade.exit_price : trade.entry_price;
             const chartType  = isClosed ? (trade.sell_type || 'SELL') : 'BUY';
 
@@ -158,24 +159,49 @@ async function fetchTrades() {
                 openChartModal(trade.ticker, trade.entry_date, chartPrice, chartType, trade.entry_price)
             );
 
-            tr.innerHTML = `
-                <td class="date-cell">${trade.entry_date}</td>
-                <td class="date-cell">${exitDateHTML}</td>
-                <td><strong>${trade.ticker}</strong></td>
-                <td><span class="${badgeClass}">${badgeLabel}</span></td>
-                <td>${formatCurrency(trade.entry_price)}</td>
-                <td>${formatCurrency(trade.exit_price)}</td>
-                <td class="mono">${(trade.qty || 0).toFixed(4)}</td>
-                <td class="mono">${durHTML}</td>
-                <td>${pnlHTML}</td>
-                <td>${pnlPctHTML}</td>
-            `;
-            tbody.appendChild(tr);
+            if (isClosed) {
+                tr.innerHTML = `
+                    <td class="date-cell">${trade.entry_date}</td>
+                    <td class="date-cell">${exitDateHTML}</td>
+                    <td><strong>${trade.ticker}</strong></td>
+                    <td><span class="${badgeClass}">${badgeLabel}</span></td>
+                    <td>${formatCurrency(trade.entry_price)}</td>
+                    <td>${formatCurrency(trade.exit_price)}</td>
+                    <td class="mono">${(trade.qty || 0).toFixed(4)}</td>
+                    <td class="mono">${durHTML}</td>
+                    <td>${pnlHTML}</td>
+                    <td>${pnlPctHTML}</td>
+                `;
+                closedTbody.appendChild(tr);
+                closedCount++;
+            } else {
+                tr.innerHTML = `
+                    <td class="date-cell">${trade.entry_date}</td>
+                    <td><strong>${trade.ticker}</strong></td>
+                    <td><span class="${badgeClass}">${badgeLabel}</span></td>
+                    <td>${formatCurrency(trade.entry_price)}</td>
+                    <td><span class="muted">—</span></td>
+                    <td class="mono">${(trade.qty || 0).toFixed(4)}</td>
+                    <td class="mono"><span class="muted">—</span></td>
+                    <td><span class="muted">—</span></td>
+                    <td><span class="muted">—</span></td>
+                `;
+                openTbody.appendChild(tr);
+                openCount++;
+            }
         });
+
+        if (openCount === 0) {
+            openTbody.innerHTML = '<tr><td colspan="9" class="text-center">No open positions.</td></tr>';
+        }
+        if (closedCount === 0) {
+            closedTbody.innerHTML = '<tr><td colspan="10" class="text-center">No closed trades found.</td></tr>';
+        }
+
     } catch (error) {
         console.error('Error fetching trades:', error);
-        document.getElementById('trades-tbody').innerHTML =
-            '<tr><td colspan="10" class="text-center text-danger">Error loading trades.</td></tr>';
+        document.getElementById('trades-open-tbody').innerHTML = '<tr><td colspan="9" class="text-center text-danger">Error loading trades.</td></tr>';
+        document.getElementById('trades-closed-tbody').innerHTML = '<tr><td colspan="10" class="text-center text-danger">Error loading trades.</td></tr>';
     }
 }
 
@@ -447,44 +473,85 @@ async function fetchCryptoTrades() {
     try {
         const res = await fetch('/api/crypto/trades');
         const trades = await res.json();
-        const tbody = document.getElementById('crypto-trades-tbody');
+        const openTbody = document.getElementById('crypto-trades-open-tbody');
+        const closedTbody = document.getElementById('crypto-trades-closed-tbody');
+        openTbody.innerHTML = '';
+        closedTbody.innerHTML = '';
+
         if (!trades || trades.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="9" class="text-center">No crypto trades yet.</td></tr>';
+            openTbody.innerHTML = '<tr><td colspan="9" class="text-center">No open positions.</td></tr>';
+            closedTbody.innerHTML = '<tr><td colspan="10" class="text-center">No crypto trades yet.</td></tr>';
             return;
         }
-        tbody.innerHTML = '';
+
+        let openCount = 0;
+        let closedCount = 0;
+
         trades.forEach(t => {
+            const isClosed = t.status === 'CLOSED';
             const pnl = t.pnl;
             const pnlClass = pnl === null ? '' : (pnl >= 0 ? 'positive' : 'negative');
-            const typeBadge = t.trade_type === 'CRYPTO_BUY'
-                ? '<span class="badge badge-buy">BUY</span>'
-                : t.trade_type === 'CRYPTO_SELL_TP'
-                    ? '<span class="badge badge-tp">TP</span>'
-                    : t.trade_type === 'CRYPTO_SELL_SL'
-                        ? '<span class="badge badge-sl">SL</span>'
-                        : `<span class="badge badge-time">${t.trade_type}</span>`;
+            let typeBadge;
+            if (!isClosed) {
+                typeBadge = '<span class="trade-type buy">● OPEN</span>';
+            } else {
+                typeBadge = t.sell_type === 'CRYPTO_BUY'
+                    ? '<span class="badge badge-buy">BUY</span>'
+                    : t.sell_type === 'CRYPTO_SELL_TP'
+                        ? '<span class="badge badge-tp">TP</span>'
+                        : t.sell_type === 'CRYPTO_SELL_SL'
+                            ? '<span class="badge badge-sl">SL</span>'
+                            : `<span class="badge badge-time">${t.sell_type || 'CLOSED'}</span>`;
+            }
 
             const tr = document.createElement('tr');
             tr.style.cursor = 'pointer';
             tr.title = 'Click to open chart';
-            tr.innerHTML = `
-                <td>${formatDate(t.date)}</td>
-                <td><strong>${t.ticker || '-'}</strong></td>
-                <td>${typeBadge}</td>
-                <td>${formatCurrency(t.notional)}</td>
-                <td>${t.entry_price ? '$' + parseFloat(t.entry_price).toFixed(4) : '-'}</td>
-                <td>${t.exit_price ? '$' + parseFloat(t.exit_price).toFixed(4) : '-'}</td>
-                <td>${t.atr_at_entry ? parseFloat(t.atr_at_entry).toFixed(4) : '-'}</td>
-                <td class="${pnlClass}">${pnl !== null ? formatCurrency(pnl) : '-'}</td>
-                <td class="${pnlClass}">${t.pnl_pct !== null ? (t.pnl_pct * 100).toFixed(2) + '%' : '-'}</td>
-            `;
 
-            // Determine symbol and price for chart
-            const sym = (t.ticker || '').replace('/USD', '');
-            const chartPrice = t.entry_price ? parseFloat(t.entry_price) : null;
-            tr.addEventListener('click', () => openCryptoChartModal(sym, chartPrice));
-            tbody.appendChild(tr);
+            if (isClosed) {
+                tr.innerHTML = `
+                    <td class="date-cell">${t.entry_date}</td>
+                    <td class="date-cell">${t.exit_date}</td>
+                    <td><strong>${t.ticker || '-'}</strong></td>
+                    <td>${typeBadge}</td>
+                    <td>${formatCurrency(t.notional)}</td>
+                    <td>${t.entry_price ? '$' + parseFloat(t.entry_price).toFixed(4) : '-'}</td>
+                    <td>${t.exit_price ? '$' + parseFloat(t.exit_price).toFixed(4) : '-'}</td>
+                    <td>${t.atr_at_entry ? parseFloat(t.atr_at_entry).toFixed(4) : '-'}</td>
+                    <td class="${pnlClass}">${pnl !== null ? formatCurrency(pnl) : '-'}</td>
+                    <td class="${pnlClass}">${t.pnl_pct !== null ? (t.pnl_pct * 100).toFixed(2) + '%' : '-'}</td>
+                `;
+                const sym = (t.ticker || '').replace('/USD', '');
+                const chartPrice = t.exit_price ? parseFloat(t.exit_price) : null;
+                tr.addEventListener('click', () => openCryptoChartModal(sym, t.entry_price ? parseFloat(t.entry_price) : null));
+                closedTbody.appendChild(tr);
+                closedCount++;
+            } else {
+                tr.innerHTML = `
+                    <td class="date-cell">${t.entry_date}</td>
+                    <td><strong>${t.ticker || '-'}</strong></td>
+                    <td>${typeBadge}</td>
+                    <td>${formatCurrency(t.notional)}</td>
+                    <td>${t.entry_price ? '$' + parseFloat(t.entry_price).toFixed(4) : '-'}</td>
+                    <td><span class="muted">—</span></td>
+                    <td>${t.atr_at_entry ? parseFloat(t.atr_at_entry).toFixed(4) : '-'}</td>
+                    <td><span class="muted">—</span></td>
+                    <td><span class="muted">—</span></td>
+                `;
+                const sym = (t.ticker || '').replace('/USD', '');
+                const chartPrice = t.entry_price ? parseFloat(t.entry_price) : null;
+                tr.addEventListener('click', () => openCryptoChartModal(sym, chartPrice));
+                openTbody.appendChild(tr);
+                openCount++;
+            }
         });
+
+        if (openCount === 0) {
+            openTbody.innerHTML = '<tr><td colspan="9" class="text-center">No open positions.</td></tr>';
+        }
+        if (closedCount === 0) {
+            closedTbody.innerHTML = '<tr><td colspan="10" class="text-center">No crypto trades yet.</td></tr>';
+        }
     } catch (e) {
         console.error('fetchCryptoTrades error:', e);
     }

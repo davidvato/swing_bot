@@ -358,16 +358,81 @@ def get_crypto_prices():
 
 @app.get("/api/crypto/trades")
 def get_crypto_trades():
-    """Returns the full crypto trade history from the crypto_trades table."""
+    """Returns the full crypto trade history from the crypto_trades table, grouped into OPEN and CLOSED."""
     try:
+        from collections import defaultdict, deque
+        from datetime import datetime as _dt
+
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute(
-            f"SELECT * FROM {config.CRYPTO_DB_TABLE} ORDER BY date DESC"
-        )
+        cur.execute(f"SELECT * FROM {config.CRYPTO_DB_TABLE} ORDER BY date ASC, id ASC")
         rows = [dict(r) for r in cur.fetchall()]
         conn.close()
-        return rows
+
+        pending_buys: dict = defaultdict(deque)
+        paired: list = []
+
+        for row in rows:
+            ticker = row["ticker"]
+            if row["trade_type"] == "CRYPTO_BUY":
+                pending_buys[ticker].append(row)
+            elif row["trade_type"].startswith("CRYPTO_SELL"):
+                if pending_buys[ticker]:
+                    buy = pending_buys[ticker].popleft()
+                    
+                    try:
+                        d1 = _dt.strptime(buy["date"].split(" ")[0], "%Y-%m-%d")
+                        d2 = _dt.strptime(row["date"].split(" ")[0], "%Y-%m-%d")
+                        duration_days = (d2 - d1).days
+                    except Exception:
+                        duration_days = None
+
+                    paired.append({
+                        "status": "CLOSED",
+                        "ticker": ticker,
+                        "sell_type": row["trade_type"],
+                        "entry_date": buy["date"],
+                        "exit_date": row["date"],
+                        "entry_price": buy["entry_price"],
+                        "exit_price": row["exit_price"],
+                        "qty": buy["qty"],
+                        "notional": buy["notional"],
+                        "pnl": row["pnl"],
+                        "pnl_pct": row["pnl_pct"],
+                        "atr_at_entry": buy.get("atr_at_entry"),
+                        "duration_days": duration_days,
+                    })
+
+        for ticker, buy_queue in pending_buys.items():
+            for buy in buy_queue:
+                paired.append({
+                    "status": "OPEN",
+                    "ticker": ticker,
+                    "sell_type": None,
+                    "entry_date": buy["date"],
+                    "exit_date": None,
+                    "entry_price": buy["entry_price"],
+                    "exit_price": None,
+                    "qty": buy["qty"],
+                    "notional": buy["notional"],
+                    "pnl": None,
+                    "pnl_pct": None,
+                    "atr_at_entry": buy.get("atr_at_entry"),
+                    "duration_days": None,
+                })
+
+        open_trades = sorted(
+            [t for t in paired if t["status"] == "OPEN"],
+            key=lambda x: x["entry_date"],
+            reverse=True,
+        )
+        closed_trades = sorted(
+            [t for t in paired if t["status"] == "CLOSED"],
+            key=lambda x: x["exit_date"],
+            reverse=True,
+        )
+        return open_trades + closed_trades
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
