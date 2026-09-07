@@ -501,7 +501,7 @@ async def run_crypto_signals(
         orders_placed += 1
         logger.info(
             f"[CRYPTO] {symbol}: Orden enviada. ${notional:.2f} nocional | "
-            f"ATR: {atr_val:.4f if atr_val else 'N/A'}"
+            f"ATR: {f'{atr_val:.4f}' if atr_val else 'N/A'}"
         )
 
     if orders_placed > 0:
