@@ -231,6 +231,7 @@ class UniverseScreener:
         """
         from alpaca.data.requests import StockBarsRequest
         from alpaca.data.timeframe import TimeFrame
+        from alpaca.data.enums import DataFeed
 
         end_date = datetime.now()
         start_date = end_date - timedelta(days=int(UNIVERSE_LOOKBACK_DAYS * 1.5))
@@ -250,6 +251,7 @@ class UniverseScreener:
                             timeframe=TimeFrame.Day,
                             start=start_date,
                             end=end_date,
+                            feed=DataFeed.IEX
                         )
                         bars = self._client.get_stock_bars(request)
                         df = bars.df

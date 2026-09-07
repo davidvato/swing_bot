@@ -19,6 +19,7 @@ import pandas as pd
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockBarsRequest
 from alpaca.data.timeframe import TimeFrame
+from alpaca.data.enums import DataFeed
 
 from config import (
     LOOKBACK_DAYS,
@@ -169,7 +170,8 @@ class DataClient:
                         symbol_or_symbols=ticker,
                         timeframe=TimeFrame.Day,
                         start=start_date,
-                        end=end_date
+                        end=end_date,
+                        feed=DataFeed.IEX
                     )
                     df_raw = self._fetch_bars_with_retry(request)
                     df_norm = self._normalize_dataframe(df_raw, ticker)
