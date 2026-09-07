@@ -405,6 +405,90 @@ def get_crypto_metrics():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/crypto/chart/{symbol}")
+def get_crypto_chart_data(symbol: str, entry_price: float = None):
+    """
+    Returns historical daily bars for a crypto pair to plot on the chart.
+
+    symbol   : e.g. 'BTC' or 'BTC/USD' — normalised internally.
+    entry_price (optional): if provided, TP (+ATR*2) and SL (-ATR*1) levels
+                            are estimated using the crypto ATR ratio from config.
+
+    Response: { bars: [...], levels: {...} | null }
+    """
+    API_KEY = os.getenv("ALPACA_API_KEY")
+    SECRET_KEY = os.getenv("ALPACA_SECRET_KEY")
+
+    if not (API_KEY and SECRET_KEY):
+        raise HTTPException(status_code=500, detail="Alpaca keys not configured in .env")
+
+    # Normalise symbol: accept both 'BTC' and 'BTC/USD'
+    clean = symbol.upper().replace("/USD", "").replace("USD", "").strip()
+    alpaca_sym = f"{clean}/USD"
+
+    try:
+        from alpaca.data.historical.crypto import CryptoHistoricalDataClient
+        from alpaca.data.requests import CryptoBarsRequest
+        from alpaca.data.timeframe import TimeFrame
+        from datetime import datetime, timedelta
+
+        client = CryptoHistoricalDataClient()  # no auth needed for crypto data
+        request = CryptoBarsRequest(
+            symbol_or_symbols=alpaca_sym,
+            timeframe=TimeFrame.Day,
+            start=datetime.utcnow() - timedelta(days=120),
+            end=datetime.utcnow(),
+        )
+        bars_df = client.get_crypto_bars(request).df
+
+        if bars_df is None or bars_df.empty:
+            raise HTTPException(status_code=404, detail=f"No data for {alpaca_sym}")
+
+        # Multi-index: (symbol, timestamp) — reset to get flat index
+        if hasattr(bars_df.index, "levels"):
+            bars_df = bars_df.xs(alpaca_sym, level=0)
+
+        bars = []
+        for ts, row in bars_df.iterrows():
+            date_str = ts.strftime("%Y-%m-%d") if hasattr(ts, "strftime") else str(ts)[:10]
+            bars.append({
+                "time": date_str,
+                "open":  round(float(row["open"]),  4),
+                "high":  round(float(row["high"]),  4),
+                "low":   round(float(row["low"]),   4),
+                "close": round(float(row["close"]), 4),
+            })
+
+        # Deduplicate by date (keep last bar per day)
+        seen = {}
+        for b in bars:
+            seen[b["time"]] = b
+        bars = sorted(seen.values(), key=lambda x: x["time"])
+
+        # Optional TP / SL levels
+        levels = None
+        if entry_price and entry_price > 0:
+            # Use ATR-based multipliers from config if available, else sensible defaults
+            tp_mult = getattr(config, "CRYPTO_ATR_TP_MULT", 2.0)
+            sl_mult = getattr(config, "CRYPTO_ATR_SL_MULT", 1.0)
+            # Estimate ATR as ~3 % of price (crypto rule-of-thumb) when real ATR unavailable
+            atr_est = entry_price * 0.03
+            levels = {
+                "entry": round(entry_price, 4),
+                "tp": round(entry_price + tp_mult * atr_est, 4),
+                "sl": round(entry_price - sl_mult * atr_est, 4),
+                "tp_pct": tp_mult * 3,
+                "sl_pct": sl_mult * 3,
+            }
+
+        return {"bars": bars, "levels": levels}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # Mount static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
 

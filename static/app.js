@@ -291,6 +291,30 @@ function switchTab(tab) {
     document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
     document.getElementById(`tab-${tab}`).classList.add('active');
     document.getElementById(`pane-${tab}`).classList.add('active');
+    // Auto-close sidebar on mobile when switching tabs
+    closeSidebar();
+}
+
+// ─── Mobile Sidebar Toggle ───────────────────────────────────────────────────────────────────────
+
+function toggleSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('sidebar-overlay');
+    const btn     = document.getElementById('hamburger-btn');
+    const isOpen  = sidebar.classList.toggle('open');
+    overlay.classList.toggle('active', isOpen);
+    btn.classList.toggle('open', isOpen);
+    document.body.style.overflow = isOpen ? 'hidden' : '';
+}
+
+function closeSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('sidebar-overlay');
+    const btn     = document.getElementById('hamburger-btn');
+    sidebar.classList.remove('open');
+    overlay.classList.remove('active');
+    btn.classList.remove('open');
+    document.body.style.overflow = '';
 }
 
 // ─── Crypto Universe Sidebar ──────────────────────────────────────────────────
@@ -380,6 +404,8 @@ async function fetchCryptoPrices() {
 
             const card = document.createElement('div');
             card.className = 'crypto-price-card glass-panel';
+            card.style.cursor = 'pointer';
+            card.title = `Click to open ${shortName} chart`;
             card.innerHTML = `
                 <div class="crypto-card-header">
                     <span class="crypto-symbol">${shortName}</span>
@@ -394,6 +420,8 @@ async function fetchCryptoPrices() {
                     <span class="${rsiColor}">RSI: ${rsi !== null && rsi !== undefined ? rsi.toFixed(1) : '---'}</span>
                 </div>
             `;
+            // Open crypto chart on card click
+            card.addEventListener('click', () => openCryptoChartModal(shortName, price));
             grid.appendChild(card);
         });
 
@@ -424,9 +452,9 @@ async function fetchCryptoTrades() {
             tbody.innerHTML = '<tr><td colspan="9" class="text-center">No crypto trades yet.</td></tr>';
             return;
         }
-        tbody.innerHTML = trades.map(t => {
+        tbody.innerHTML = '';
+        trades.forEach(t => {
             const pnl = t.pnl;
-            const isSell = t.trade_type && t.trade_type.includes('SELL');
             const pnlClass = pnl === null ? '' : (pnl >= 0 ? 'positive' : 'negative');
             const typeBadge = t.trade_type === 'CRYPTO_BUY'
                 ? '<span class="badge badge-buy">BUY</span>'
@@ -435,7 +463,11 @@ async function fetchCryptoTrades() {
                     : t.trade_type === 'CRYPTO_SELL_SL'
                         ? '<span class="badge badge-sl">SL</span>'
                         : `<span class="badge badge-time">${t.trade_type}</span>`;
-            return `<tr>
+
+            const tr = document.createElement('tr');
+            tr.style.cursor = 'pointer';
+            tr.title = 'Click to open chart';
+            tr.innerHTML = `
                 <td>${formatDate(t.date)}</td>
                 <td><strong>${t.ticker || '-'}</strong></td>
                 <td>${typeBadge}</td>
@@ -445,10 +477,112 @@ async function fetchCryptoTrades() {
                 <td>${t.atr_at_entry ? parseFloat(t.atr_at_entry).toFixed(4) : '-'}</td>
                 <td class="${pnlClass}">${pnl !== null ? formatCurrency(pnl) : '-'}</td>
                 <td class="${pnlClass}">${t.pnl_pct !== null ? (t.pnl_pct * 100).toFixed(2) + '%' : '-'}</td>
-            </tr>`;
-        }).join('');
+            `;
+
+            // Determine symbol and price for chart
+            const sym = (t.ticker || '').replace('/USD', '');
+            const chartPrice = t.entry_price ? parseFloat(t.entry_price) : null;
+            tr.addEventListener('click', () => openCryptoChartModal(sym, chartPrice));
+            tbody.appendChild(tr);
+        });
     } catch (e) {
         console.error('fetchCryptoTrades error:', e);
+    }
+}
+
+// ─── Crypto Chart Modal ──────────────────────────────────────────────────────────────────────
+
+/**
+ * Opens the shared chart modal for a crypto pair.
+ * @param {string} symbol  - Short symbol, e.g. 'BTC'
+ * @param {number|null} entryPrice - Optional entry price for TP/SL levels
+ */
+async function openCryptoChartModal(symbol, entryPrice) {
+    const modal     = document.getElementById('chart-modal');
+    const title     = document.getElementById('modal-title');
+    const loader    = document.getElementById('modal-loader');
+    const container = document.getElementById('chart-container');
+
+    title.textContent = `${symbol}/USD — Price Chart`;
+    container.innerHTML = '';
+    loader.style.display = 'block';
+    modal.style.display = 'flex';
+
+    const epParam = (entryPrice && entryPrice > 0) ? `?entry_price=${entryPrice}` : '';
+
+    try {
+        const res  = await fetch(`/api/crypto/chart/${symbol}${epParam}`);
+        const data = await res.json();
+
+        loader.style.display = 'none';
+
+        const bars   = data.bars || [];
+        const levels = data.levels || null;
+
+        if (!bars.length) {
+            container.innerHTML = '<div class="text-center">No chart data available.</div>';
+            return;
+        }
+
+        const chartOptions = {
+            layout: {
+                textColor: '#f0f2f5',
+                background: { type: 'solid', color: 'transparent' }
+            },
+            grid: {
+                vertLines: { color: 'rgba(255,255,255,0.05)' },
+                horzLines: { color: 'rgba(255,255,255,0.05)' }
+            }
+        };
+
+        currentChart = LightweightCharts.createChart(container, chartOptions);
+        const candlestickSeries = currentChart.addCandlestickSeries({
+            upColor:      '#10b981',
+            downColor:    '#ef4444',
+            borderVisible: false,
+            wickUpColor:  '#10b981',
+            wickDownColor: '#ef4444'
+        });
+        candlestickSeries.setData(bars);
+
+        // Entry price line (amber for crypto)
+        if (entryPrice && entryPrice > 0) {
+            candlestickSeries.createPriceLine({
+                price: entryPrice,
+                color: '#f59e0b',
+                lineWidth: 2,
+                lineStyle: LightweightCharts.LineStyle.Dashed,
+                axisLabelVisible: true,
+                title: `Entry  $${entryPrice.toFixed(4)}`,
+            });
+        }
+
+        // TP / SL lines
+        if (levels) {
+            candlestickSeries.createPriceLine({
+                price: levels.tp,
+                color: '#10b981',
+                lineWidth: 1,
+                lineStyle: LightweightCharts.LineStyle.Dotted,
+                axisLabelVisible: true,
+                title: `TP +${levels.tp_pct.toFixed(0)}%  $${levels.tp.toFixed(4)}`,
+            });
+            candlestickSeries.createPriceLine({
+                price: levels.sl,
+                color: '#ef4444',
+                lineWidth: 1,
+                lineStyle: LightweightCharts.LineStyle.Dotted,
+                axisLabelVisible: true,
+                title: `SL -${levels.sl_pct.toFixed(0)}%  $${levels.sl.toFixed(4)}`,
+            });
+        }
+
+        currentChart.timeScale().fitContent();
+
+    } catch (e) {
+        loader.style.display = 'none';
+        container.innerHTML = '<div class="text-center">Error loading crypto chart.</div>';
+        console.error('openCryptoChartModal error:', e);
     }
 }
 

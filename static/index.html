@@ -1,17 +1,31 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Swing Trading Bot Dashboard</title>
+    <meta name="description" content="Swing Trading Bot — real-time dashboard for equities and crypto algorithmic trading.">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/styles.css">
     <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
+
+    <!-- ── Mobile top bar ──────────────────────────────────────────── -->
+    <div class="mobile-topbar">
+        <span class="mobile-title">Swing Bot <span class="status-indicator"></span></span>
+        <button class="hamburger-btn" id="hamburger-btn" onclick="toggleSidebar()" aria-label="Toggle menu">
+            <span></span><span></span><span></span>
+        </button>
+    </div>
+
+    <!-- ── Sidebar overlay (mobile) ───────────────────────────────── -->
+    <div class="sidebar-overlay" id="sidebar-overlay" onclick="closeSidebar()"></div>
+
     <div class="app-container">
         <!-- Sidebar / Settings Info -->
-        <aside class="glass-panel sidebar">
+        <aside class="glass-panel sidebar" id="sidebar">
+            <button class="sidebar-close-btn" onclick="closeSidebar()" aria-label="Close menu">&#x2715;</button>
             <h2>Swing Bot <span class="status-indicator"></span></h2>
             <div class="config-section">
                 <h3>Configuration</h3>
@@ -19,19 +33,15 @@
                     <li>Loading...</li>
                 </ul>
             </div>
-            
+
             <div class="market-universe">
                 <h3>Equity Universe</h3>
-                <div id="tickers-container" class="tags">
-                    <!-- Tickers will be injected here -->
-                </div>
+                <div id="tickers-container" class="tags"></div>
             </div>
 
             <div class="market-universe crypto-universe-sidebar">
-                <h3>₿ Crypto Universe</h3>
-                <div id="crypto-tickers-container" class="tags crypto-tags">
-                    <!-- Crypto tickers will be injected here -->
-                </div>
+                <h3>&#x20BF; Crypto Universe</h3>
+                <div id="crypto-tickers-container" class="tags crypto-tags"></div>
                 <p class="universe-meta" id="crypto-universe-meta"></p>
             </div>
         </aside>
@@ -39,20 +49,18 @@
         <!-- Main Dashboard -->
         <main class="dashboard-main">
             <header class="top-nav glass-panel">
-                <!-- Tab Navigation -->
                 <div class="tab-nav">
                     <button class="tab-btn active" id="tab-equities" onclick="switchTab('equities')">
-                        📈 Equities
+                        &#x1F4C8; Equities
                     </button>
                     <button class="tab-btn" id="tab-crypto" onclick="switchTab('crypto')">
-                        ₿ Crypto
+                        &#x20BF; Crypto
                     </button>
                 </div>
             </header>
 
             <!-- ══════════════ EQUITIES TAB ══════════════ -->
             <div id="pane-equities" class="tab-pane active">
-                <!-- KPI Cards -->
                 <section class="kpi-grid">
                     <div class="kpi-card glass-panel">
                         <h3>Total Budget (Equity)</h3>
@@ -74,7 +82,6 @@
                     </div>
                 </section>
 
-                <!-- Trade History Table -->
                 <section class="trades-section glass-panel">
                     <h2>Trade History</h2>
                     <div class="table-responsive">
@@ -94,9 +101,7 @@
                                 </tr>
                             </thead>
                             <tbody id="trades-tbody">
-                                <tr>
-                                    <td colspan="10" class="text-center">Loading trades...</td>
-                                </tr>
+                                <tr><td colspan="10" class="text-center">Loading trades...</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -105,7 +110,6 @@
 
             <!-- ══════════════ CRYPTO TAB ══════════════ -->
             <div id="pane-crypto" class="tab-pane">
-                <!-- Crypto KPI Cards -->
                 <section class="kpi-grid">
                     <div class="kpi-card glass-panel crypto-card">
                         <h3>Crypto P&amp;L</h3>
@@ -127,20 +131,18 @@
                     </div>
                 </section>
 
-                <!-- Crypto Price Grid -->
                 <section class="crypto-prices-section glass-panel">
                     <div class="section-header">
-                        <h2>₿ Live Crypto Prices</h2>
+                        <h2>&#x20BF; Live Crypto Prices</h2>
                         <span class="update-badge" id="crypto-last-update">Updating...</span>
                     </div>
-                    <div id="crypto-price-grid" class="crypto-price-grid">
-                        <!-- Cards injected by JS -->
-                    </div>
+                    <p class="crypto-chart-hint">&#x1F4A1; Click any card to open the price chart</p>
+                    <div id="crypto-price-grid" class="crypto-price-grid"></div>
                 </section>
 
-                <!-- Crypto Trade History -->
                 <section class="trades-section glass-panel">
                     <h2>Crypto Trade History</h2>
+                    <p class="crypto-chart-hint">&#x1F4A1; Click any row to open the chart</p>
                     <div class="table-responsive">
                         <table class="modern-table">
                             <thead>
@@ -157,9 +159,7 @@
                                 </tr>
                             </thead>
                             <tbody id="crypto-trades-tbody">
-                                <tr>
-                                    <td colspan="9" class="text-center">No crypto trades yet.</td>
-                                </tr>
+                                <tr><td colspan="9" class="text-center">No crypto trades yet.</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -168,18 +168,18 @@
         </main>
     </div>
 
-    <!-- Chart Modal -->
+    <!-- Chart Modal (shared for Equities & Crypto) -->
     <div id="chart-modal" class="modal">
         <div class="modal-content glass-panel">
             <div class="modal-header">
                 <h2 id="modal-title">Ticker Chart</h2>
-                <button class="close-btn" onclick="closeChartModal()">&times;</button>
+                <button class="close-btn" onclick="closeChartModal()" aria-label="Close chart">&times;</button>
             </div>
             <div id="modal-loader" class="loader text-center">Loading chart data...</div>
             <div id="chart-container" class="chart-container"></div>
         </div>
     </div>
 
-    <script src="/static/app.js?v=4"></script>
+    <script src="/static/app.js?v=5"></script>
 </body>
 </html>

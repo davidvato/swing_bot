@@ -221,7 +221,104 @@ body {
 .trade-type.sell-tp { background: rgba(16, 185, 129, 0.1); color: var(--success-color); }
 .trade-type.sell-sl { background: rgba(239, 68, 68, 0.1); color: var(--danger-color); }
 
-/* Responsive */
+/* ══════════════════════════════════════════════════════════════════════════
+   RESPONSIVE DESIGN
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Mobile Top Bar ─────────────────────────────────────────────────────── */
+.mobile-topbar {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 200;
+    height: 56px;
+    padding: 0 1rem;
+    align-items: center;
+    justify-content: space-between;
+    background: rgba(15, 17, 21, 0.92);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-bottom: 1px solid var(--glass-border);
+}
+.mobile-title {
+    font-size: 1rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* ── Hamburger Button ───────────────────────────────────────────────────── */
+.hamburger-btn {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 5px;
+    width: 36px;
+    height: 36px;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 8px;
+    transition: background 0.2s ease;
+}
+.hamburger-btn:hover { background: rgba(255,255,255,0.08); }
+.hamburger-btn span {
+    display: block;
+    height: 2px;
+    width: 100%;
+    background: var(--text-primary);
+    border-radius: 2px;
+    transition: all 0.3s ease;
+}
+.hamburger-btn.open span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+.hamburger-btn.open span:nth-child(2) { opacity: 0; }
+.hamburger-btn.open span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+
+/* ── Sidebar Close Button (mobile only) ─────────────────────────────────── */
+.sidebar-close-btn {
+    display: none;
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid var(--glass-border);
+    color: var(--text-secondary);
+    font-size: 1rem;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+}
+.sidebar-close-btn:hover { background: rgba(255,255,255,0.12); color: var(--text-primary); }
+
+/* ── Sidebar Overlay ────────────────────────────────────────────────────── */
+.sidebar-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 299;
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(3px);
+}
+.sidebar-overlay.active { display: block; }
+
+/* ── Crypto chart hint ──────────────────────────────────────────────────── */
+.crypto-chart-hint {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    margin-bottom: 0.75rem;
+    opacity: 0.7;
+}
+
+/* ── Tablet breakpoint (≤ 1024px) ───────────────────────────────────────── */
 @media (max-width: 1024px) {
     .app-container {
         flex-direction: column;
@@ -231,6 +328,92 @@ body {
         flex-direction: row;
         flex-wrap: wrap;
     }
+    .kpi-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+/* ── Mobile breakpoint (≤ 768px) ────────────────────────────────────────── */
+@media (max-width: 768px) {
+    /* Show topbar, hide sidebar title (it lives in topbar) */
+    .mobile-topbar { display: flex; }
+    body { padding-top: 56px; }
+
+    /* Slide-out sidebar */
+    .app-container {
+        padding: 1rem;
+        gap: 1rem;
+        padding-top: 0.75rem;
+    }
+    .sidebar {
+        position: fixed;
+        top: 56px;
+        left: 0;
+        bottom: 0;
+        z-index: 300;
+        width: 280px;
+        max-width: 85vw;
+        transform: translateX(-100%);
+        transition: transform 0.32s cubic-bezier(0.4, 0, 0.2, 1);
+        overflow-y: auto;
+        border-radius: 0 16px 16px 0;
+        flex-direction: column;
+        flex-wrap: nowrap;
+    }
+    .sidebar.open { transform: translateX(0); }
+    .sidebar-close-btn { display: flex; }
+    /* Hide sidebar h2 on mobile (already shown in topbar) */
+    .sidebar > h2 { display: none; }
+
+    /* Stack KPI cards */
+    .kpi-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 0.75rem;
+    }
+    .kpi-value { font-size: 1.4rem; }
+
+    /* Tables: reduce padding */
+    .modern-table th,
+    .modern-table td { padding: 0.65rem 0.6rem; font-size: 0.82rem; }
+
+    /* Modal full-screen on mobile */
+    .modal-content {
+        width: 100%;
+        max-width: 100%;
+        height: 90vh;
+        border-radius: 16px 16px 0 0;
+        margin: auto 0 0 0;
+    }
+    .modal {
+        align-items: flex-end;
+    }
+
+    /* Crypto price cards: 2 columns */
+    .crypto-price-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .top-nav { padding: 0.75rem 1rem; }
+    .tab-btn { padding: 0.45rem 1rem; font-size: 0.82rem; }
+
+    .trades-section { padding: 1rem; }
+    .kpi-card { padding: 1rem; }
+}
+
+/* ── Small phones (≤ 480px) ─────────────────────────────────────────────── */
+@media (max-width: 480px) {
+    .kpi-grid {
+        grid-template-columns: 1fr 1fr;
+        gap: 0.5rem;
+    }
+    .kpi-value { font-size: 1.2rem; }
+    .kpi-card h3 { font-size: 0.78rem; }
+    .crypto-price-grid {
+        grid-template-columns: 1fr 1fr;
+        gap: 0.5rem;
+    }
+    .crypto-price-card { padding: 0.75rem; }
+    .crypto-price { font-size: 0.95rem; }
 }
 
 /* Modal Styles */
