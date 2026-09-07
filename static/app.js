@@ -183,8 +183,8 @@ async function fetchTrades() {
                     <td><span class="muted">—</span></td>
                     <td class="mono">${(trade.qty || 0).toFixed(4)}</td>
                     <td class="mono"><span class="muted">—</span></td>
-                    <td><span class="muted">—</span></td>
-                    <td><span class="muted">—</span></td>
+                    <td>${pnlHTML}</td>
+                    <td>${pnlPctHTML}</td>
                 `;
                 openTbody.appendChild(tr);
                 openCount++;
@@ -535,8 +535,8 @@ async function fetchCryptoTrades() {
                     <td>${t.entry_price ? '$' + parseFloat(t.entry_price).toFixed(4) : '-'}</td>
                     <td><span class="muted">—</span></td>
                     <td>${t.atr_at_entry ? parseFloat(t.atr_at_entry).toFixed(4) : '-'}</td>
-                    <td><span class="muted">—</span></td>
-                    <td><span class="muted">—</span></td>
+                    <td class="${pnlClass}">${pnl !== null ? formatCurrency(pnl) : '-'}</td>
+                    <td class="${pnlClass}">${t.pnl_pct !== null ? (t.pnl_pct * 100).toFixed(2) + '%' : '-'}</td>
                 `;
                 const sym = (t.ticker || '').replace('/USD', '');
                 const chartPrice = t.entry_price ? parseFloat(t.entry_price) : null;

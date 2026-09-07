@@ -208,6 +208,26 @@ def get_trades():
                     "sell_id": None,
                 })
 
+        # Fetch live P&L from Alpaca for OPEN trades
+        try:
+            import os
+            from alpaca.trading.client import TradingClient
+            API_KEY = os.getenv("ALPACA_API_KEY")
+            SECRET_KEY = os.getenv("ALPACA_SECRET_KEY")
+            if API_KEY and SECRET_KEY:
+                is_paper = str(os.getenv("ALPACA_PAPER", "True")).lower() == "true"
+                client = TradingClient(API_KEY, SECRET_KEY, paper=is_paper)
+                positions = client.get_all_positions()
+                pos_map = {p.symbol: p for p in positions}
+                
+                for t in paired:
+                    if t["status"] == "OPEN" and t["ticker"] in pos_map:
+                        p = pos_map[t["ticker"]]
+                        t["pnl"] = float(p.unrealized_pl) if p.unrealized_pl else 0.0
+                        t["pnl_pct"] = float(p.unrealized_plpc) if p.unrealized_plpc else 0.0
+        except Exception as e:
+            print(f"Error fetching live P&L for equities: {e}")
+
         # Sort: OPEN first (newest entry first), then CLOSED by exit_date DESC
         open_trades = sorted(
             [t for t in paired if t["status"] == "OPEN"],
