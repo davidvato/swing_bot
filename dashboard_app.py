@@ -33,6 +33,45 @@ def get_db_connection():
     conn.row_factory = sqlite3.Row
     return conn
 
+
+def _seed_db_if_empty():
+    """
+    Aplica seed_trades.sql si la tabla 'trades' esta vacia.
+    Esto permite que Render (filesystem efimero) arranque con historial
+    exportado desde el entorno local.
+    """
+    import os
+    from pathlib import Path
+
+    seed_file = Path("seed_trades.sql")
+    if not seed_file.exists():
+        return  # No hay seed disponible, nada que hacer
+
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) as cnt FROM trades")
+        count = cur.fetchone()["cnt"]
+        if count == 0:
+            sql = seed_file.read_text(encoding="utf-8")
+            # Ejecutar cada sentencia por separado
+            for stmt in sql.split(";"):
+                stmt = stmt.strip()
+                if stmt and not stmt.startswith("--"):
+                    try:
+                        cur.execute(stmt)
+                    except Exception:
+                        pass  # Ignorar errores de filas duplicadas
+            conn.commit()
+            print(f"[SEED] DB sembrada desde {seed_file} ({count} → trades importados)")
+        conn.close()
+    except Exception as e:
+        print(f"[SEED] Error al sembrar DB: {e}")
+
+
+# Ejecutar seed al importar el modulo (antes de que FastAPI atienda requests)
+_seed_db_if_empty()
+
 @app.get("/api/config")
 def get_bot_config():
     """Returns basic configuration rules of the bot."""

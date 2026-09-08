@@ -499,13 +499,17 @@ async function fetchCryptoTrades() {
             if (!isClosed) {
                 typeBadge = '<span class="trade-type buy">● OPEN</span>';
             } else {
-                typeBadge = t.sell_type === 'CRYPTO_BUY'
-                    ? '<span class="badge badge-buy">BUY</span>'
-                    : t.sell_type === 'CRYPTO_SELL_TP'
-                        ? '<span class="badge badge-tp">TP</span>'
-                        : t.sell_type === 'CRYPTO_SELL_SL'
-                            ? '<span class="badge badge-sl">SL</span>'
-                            : `<span class="badge badge-time">${t.sell_type || 'CLOSED'}</span>`;
+                // Correctly map crypto sell types to badges
+                const st = (t.sell_type || '').toUpperCase();
+                if (st.includes('TP')) {
+                    typeBadge = '<span class="trade-type sell-tp">✔ SELL_TP</span>';
+                } else if (st.includes('SL')) {
+                    typeBadge = '<span class="trade-type sell-sl">✘ SELL_SL</span>';
+                } else if (st.includes('TIME') || st.includes('72H') || st.includes('EOW')) {
+                    typeBadge = `<span class="trade-type sell">⏰ ${t.sell_type}</span>`;
+                } else {
+                    typeBadge = `<span class="trade-type sell">${t.sell_type || 'CLOSED'}</span>`;
+                }
             }
 
             const tr = document.createElement('tr');
