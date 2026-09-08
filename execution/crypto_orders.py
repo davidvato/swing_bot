@@ -9,13 +9,26 @@ Diferencias clave vs execution/orders.py (equities):
   - Las ordenes cripto son notionales por defecto (no qty fija).
   - No hay restriccion de horario (cripto opera 24/7).
   - El mercado de cripto siempre esta 'abierto' para Alpaca.
+
+ORDENES BRACKET (OCO):
+  submit_bracket_buy() envia una sola orden con tres legs:
+    1. Entrada: Limit Buy ligeramente por encima del precio actual.
+    2. TP leg:  Limit Sell al precio de Take-Profit calculado por ATR.
+    3. SL leg:  Stop Sell al precio de Stop-Loss calculado por ATR.
+  Alpaca vigila el precio en sus servidores 24/7, eliminando la
+  dependencia del supervisor local de polling cada 5 minutos.
 """
 
 import logging
 from typing import Optional
 
 from alpaca.trading.client import TradingClient
-from alpaca.trading.requests import MarketOrderRequest
+from alpaca.trading.requests import (
+    MarketOrderRequest,
+    LimitOrderRequest,
+    TakeProfitRequest,
+    StopLossRequest,
+)
 from alpaca.trading.enums import OrderSide, TimeInForce
 
 logger = logging.getLogger(__name__)
@@ -109,6 +122,66 @@ class CryptoOrderManager:
             return order
         except Exception as exc:
             logger.error(f"[CRYPTO SELL] {symbol}: Error enviando orden. {exc}")
+            return None
+
+    def submit_bracket_buy(
+        self,
+        symbol: str,
+        qty: float,
+        limit_price: float,
+        take_profit_price: float,
+        stop_loss_price: float,
+    ) -> Optional[object]:
+        """
+        Envia una orden Bracket (OCO) para un par cripto.
+
+        Alpaca gestiona automaticamente los legs de TP y SL en sus servidores,
+        eliminando la necesidad de supervision local por polling.
+
+        La orden se compone de:
+          - Entrada: Limit Buy a `limit_price` (ligeramente sobre el mercado).
+          - TP leg:  Limit Sell a `take_profit_price`.
+          - SL leg:  Stop Sell a `stop_loss_price`.
+
+        Args:
+            symbol: Par cripto Alpaca (ej. 'BTC/USD').
+            qty: Cantidad exacta de tokens a comprar.
+            limit_price: Precio limite de la orden de entrada (USD).
+            take_profit_price: Precio objetivo de Take-Profit (USD).
+            stop_loss_price: Precio de Stop-Loss (USD).
+
+        Returns:
+            Objeto Order de Alpaca con los legs adjuntos, o None si falla.
+        """
+        try:
+            alpaca_symbol = symbol.replace("/", "")
+            request = LimitOrderRequest(
+                symbol=alpaca_symbol,
+                qty=round(qty, 8),
+                side=OrderSide.BUY,
+                time_in_force=TimeInForce.GTC,
+                limit_price=round(limit_price, 8),
+                take_profit=TakeProfitRequest(
+                    limit_price=round(take_profit_price, 8)
+                ),
+                stop_loss=StopLossRequest(
+                    stop_price=round(stop_loss_price, 8)
+                ),
+            )
+            order = self._client.submit_order(request)
+            logger.info(
+                f"[CRYPTO BRACKET BUY] {symbol}: qty={qty:.8f} | "
+                f"Entry Limit=${limit_price:.6f} | "
+                f"TP=${take_profit_price:.6f} | "
+                f"SL=${stop_loss_price:.6f} | "
+                f"Order ID: {order.id}"
+            )
+            return order
+        except Exception as exc:
+            logger.error(
+                f"[CRYPTO BRACKET BUY] {symbol}: Error enviando orden bracket. {exc}. "
+                "Verifique que la cuenta tenga saldo suficiente y que los precios sean validos."
+            )
             return None
 
     def get_latest_quote(self, symbol: str) -> float:

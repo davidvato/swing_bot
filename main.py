@@ -487,16 +487,50 @@ async def run_crypto_signals(
         if not generate_crypto_signal(df):
             continue
 
-        logger.info(f"[CRYPTO] {symbol}: SEÑAL DE COMPRA. Enviando orden...")
-        order = await asyncio.get_event_loop().run_in_executor(
-            None, crypto_order_manager.submit_buy, symbol, notional
-        )
-        if order is None:
-            continue
+        logger.info(f"[CRYPTO] {symbol}: SEÑAL DE COMPRA. Enviando orden bracket...")
 
         entry_price = float(last["close"])
         atr_val = float(last["atr"]) if "atr" in df.columns and not pd.isna(last.get("atr", float("nan"))) else None
         qty = notional / entry_price if entry_price > 0 else 0.0
+
+        # ── Calcular precios de TP y SL con ATR (o fallback % fijo) ──────────
+        if atr_val and not pd.isna(atr_val) and atr_val > 0:
+            from config import CRYPTO_ATR_TP_MULT, CRYPTO_ATR_SL_MULT
+            take_profit_price = entry_price + (atr_val * CRYPTO_ATR_TP_MULT)
+            stop_loss_price   = entry_price - (atr_val * CRYPTO_ATR_SL_MULT)
+        else:
+            from config import CRYPTO_TAKE_PROFIT_PCT, CRYPTO_STOP_LOSS_PCT
+            take_profit_price = entry_price * (1.0 + CRYPTO_TAKE_PROFIT_PCT)
+            stop_loss_price   = entry_price * (1.0 - CRYPTO_STOP_LOSS_PCT)
+
+        # El precio limite de entrada se fija +0.2% sobre el mercado para
+        # garantizar fill rapido (sin quedar en libro indefinidamente).
+        limit_entry_price = entry_price * 1.002
+
+        logger.info(
+            f"[CRYPTO] {symbol}: entry_limit=${limit_entry_price:.6f} | "
+            f"TP=${take_profit_price:.6f} | SL=${stop_loss_price:.6f} | "
+            f"qty={qty:.8f} | ATR={f'{atr_val:.4f}' if atr_val else 'N/A'}"
+        )
+
+        # ── Enviar orden Bracket a Alpaca ─────────────────────────────────────
+        order = await asyncio.get_event_loop().run_in_executor(
+            None,
+            crypto_order_manager.submit_bracket_buy,
+            symbol,
+            qty,
+            limit_entry_price,
+            take_profit_price,
+            stop_loss_price,
+        )
+        if order is None:
+            logger.error(
+                f"[CRYPTO] {symbol}: Orden bracket rechazada. "
+                "Abortando señal para este simbolo."
+            )
+            continue
+
+        bracket_order_id = str(order.id) if hasattr(order, "id") else None
 
         trade_logger.log_crypto_entry({
             "ticker": symbol,
@@ -514,11 +548,13 @@ async def run_crypto_signals(
             notional=notional,
             kelly_pct=kelly_pct,
             atr_at_entry=atr_val,
+            bracket_order_id=bracket_order_id,
         )
         orders_placed += 1
         logger.info(
-            f"[CRYPTO] {symbol}: Orden enviada. ${notional:.2f} nocional | "
-            f"ATR: {f'{atr_val:.4f}' if atr_val else 'N/A'}"
+            f"[CRYPTO] {symbol}: Orden bracket enviada. ${notional:.2f} nocional | "
+            f"ATR: {f'{atr_val:.4f}' if atr_val else 'N/A'} | "
+            f"BracketID: {bracket_order_id or 'N/A'}"
         )
 
     if orders_placed > 0:

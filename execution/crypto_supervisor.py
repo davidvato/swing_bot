@@ -1,17 +1,25 @@
 """
-execution/crypto_supervisor.py — Supervisor Asincrono de Posiciones Cripto
+execution/crypto_supervisor.py — Supervisor de Posiciones Cripto (Monitor)
 =========================================================================
-Emula TP/SL para posiciones cripto usando ATR dinamico (Average True Range).
+Monitorea posiciones cripto ABIERTAS en Alpaca para detectar cuándo el broker
+ejecuto automaticamente el TP o el SL (via ordenes Bracket enviadas por
+crypto_orders.submit_bracket_buy).
 
-DIFERENCIAS CLAVE vs execution/supervisor.py (equities):
-  - TP/SL basados en ATR: se adaptan a la volatilidad real del activo.
-    TP = entry + (atr × CRYPTO_ATR_TP_MULT)   → Risk/Reward 2:1
-    SL = entry - (atr × CRYPTO_ATR_SL_MULT)
-  - Fallback a % fijo si ATR no disponible (datos insuficientes).
-  - Trailing SL dinamico: SL sube con el precio para proteger ganancias.
+ROL ACTUAL (Bracket Order Mode):
+  - Ya NO emula TP/SL localmente (eso lo hace Alpaca en sus servidores).
+  - Monitorea el estado de la posicion en Alpaca cada CRYPTO_POLL_INTERVAL_SEC.
+  - Cuando la posicion desaparece (fue cerrada por TP o SL del broker),
+    consulta la orden de venta ejecutada para obtener el precio de salida real
+    y registra la operacion en el trade log (SQLite + Telegram).
+  - Si se supera CRYPTO_MAX_HOLD_HOURS sin que el broker haya cerrado la
+    posicion: cancela las legs OCO pendientes y envía una venta a mercado
+    como fallback de tiempo.
+
+DIFERENCIAS vs supervision.py (equities):
   - Opera 24/7 (sin restriccion de horario de mercado).
-  - Tiempo maximo de holding medido en HORAS (no dias).
-  - Poll interval: CRYPTO_POLL_INTERVAL_SEC (5 min vs 60s de equities).
+  - Tiempo maximo de holding medido en HORAS.
+  - Poll interval: CRYPTO_POLL_INTERVAL_SEC (5 min).
+  - El precio de salida real se obtiene de la orden ejecutada por Alpaca.
 """
 
 import asyncio
@@ -48,8 +56,8 @@ class CryptoPositionRecord:
         notional: Importe invertido en USD.
         kelly_pct: Fraccion Kelly aplicada.
         atr_at_entry: ATR-14 al momento de la compra (None si no disponible).
+        bracket_order_id: ID de la orden bracket enviada a Alpaca.
         task: Referencia a la tarea asyncio del supervisor.
-        highest_price: Maximo precio alcanzado desde la entrada (para trailing SL).
     """
     symbol: str
     entry_price: float
@@ -58,19 +66,16 @@ class CryptoPositionRecord:
     notional: float
     kelly_pct: float
     atr_at_entry: Optional[float] = None
+    bracket_order_id: Optional[str] = None
     task: Optional[asyncio.Task] = field(default=None, repr=False)
-    highest_price: float = field(init=False)
-
-    def __post_init__(self):
-        self.highest_price = self.entry_price
 
     @property
     def target_tp(self) -> float:
         """
-        Precio objetivo de Take-Profit.
+        Precio objetivo de Take-Profit (referencia para logs).
 
-        Si ATR disponible: entry + (ATR × CRYPTO_ATR_TP_MULT)
-        Fallback:          entry × (1 + CRYPTO_TAKE_PROFIT_PCT)
+        Si ATR disponible: entry + (ATR x CRYPTO_ATR_TP_MULT)
+        Fallback:          entry x (1 + CRYPTO_TAKE_PROFIT_PCT)
         """
         if self.atr_at_entry and not np.isnan(self.atr_at_entry) and self.atr_at_entry > 0:
             return self.entry_price + (self.atr_at_entry * CRYPTO_ATR_TP_MULT)
@@ -79,15 +84,14 @@ class CryptoPositionRecord:
     @property
     def target_sl(self) -> float:
         """
-        Precio objetivo de Stop-Loss (trailing desde el maximo alcanzado).
+        Precio objetivo de Stop-Loss (referencia para logs).
 
-        Si ATR disponible: highest_price - (ATR × CRYPTO_ATR_SL_MULT)
-        Fallback:          highest_price × (1 - CRYPTO_STOP_LOSS_PCT)
-        El SL sube con el precio (trailing) para proteger ganancias.
+        Si ATR disponible: entry - (ATR x CRYPTO_ATR_SL_MULT)
+        Fallback:          entry x (1 - CRYPTO_STOP_LOSS_PCT)
         """
         if self.atr_at_entry and not np.isnan(self.atr_at_entry) and self.atr_at_entry > 0:
-            return self.highest_price - (self.atr_at_entry * CRYPTO_ATR_SL_MULT)
-        return self.highest_price * (1.0 - CRYPTO_STOP_LOSS_PCT)
+            return self.entry_price - (self.atr_at_entry * CRYPTO_ATR_SL_MULT)
+        return self.entry_price * (1.0 - CRYPTO_STOP_LOSS_PCT)
 
     @property
     def hours_held(self) -> float:
@@ -108,7 +112,11 @@ class CryptoPositionRecord:
 
 class CryptoPositionSupervisor:
     """
-    Supervisor asincrono 24/7 de posiciones cripto con ATR dinamico.
+    Supervisor asincrono 24/7 de posiciones cripto con ordenes Bracket.
+
+    Monitorea en Alpaca si la posicion fue cerrada automaticamente por el
+    broker (TP o SL), registra la salida en el log y maneja el timeout de
+    CRYPTO_MAX_HOLD_HOURS como fallback de seguridad.
     """
 
     def __init__(self, order_manager, trade_logger) -> None:
@@ -116,7 +124,7 @@ class CryptoPositionSupervisor:
         self._trade_logger = trade_logger
         self._positions: dict[str, CryptoPositionRecord] = {}
         self._lock = asyncio.Lock()
-        logger.info("CryptoPositionSupervisor inicializado.")
+        logger.info("CryptoPositionSupervisor inicializado (modo Bracket Order).")
 
     def add_position(
         self,
@@ -127,6 +135,7 @@ class CryptoPositionSupervisor:
         kelly_pct: float,
         atr_at_entry: Optional[float] = None,
         entry_time: Optional[datetime] = None,
+        bracket_order_id: Optional[str] = None,
     ) -> CryptoPositionRecord:
         """
         Registra una posicion cripto para supervision.
@@ -139,6 +148,7 @@ class CryptoPositionSupervisor:
             kelly_pct: Fraccion Kelly aplicada.
             atr_at_entry: ATR-14 al momento de la compra.
             entry_time: Timestamp UTC (default: ahora).
+            bracket_order_id: ID de la orden bracket en Alpaca (para tracking).
         """
         if entry_time is None:
             entry_time = datetime.now(timezone.utc)
@@ -151,85 +161,73 @@ class CryptoPositionSupervisor:
             notional=notional,
             kelly_pct=kelly_pct,
             atr_at_entry=atr_at_entry,
+            bracket_order_id=bracket_order_id,
         )
         self._positions[symbol] = record
 
         tp_mode = f"ATR×{CRYPTO_ATR_TP_MULT}" if (atr_at_entry and atr_at_entry > 0) else "fijo"
         logger.info(
-            f"[CRYPTO {symbol}] Posicion registrada: "
+            f"[CRYPTO {symbol}] Posicion registrada (Bracket): "
             f"entry=${entry_price:.4f}, qty={qty:.8f}, "
             f"TP=${record.target_tp:.4f} (+{record.tp_pct*100:.2f}%, modo={tp_mode}), "
             f"SL=${record.target_sl:.4f} ({record.sl_pct*100:.2f}%), "
-            f"ATR={atr_at_entry:.4f if atr_at_entry else 'N/A'}"
+            f"ATR={f'{atr_at_entry:.4f}' if atr_at_entry else 'N/A'}, "
+            f"BracketID={bracket_order_id or 'N/A'}"
         )
         return record
 
     async def _supervise_position(self, record: CryptoPositionRecord) -> None:
-        """Corutina de supervision 24/7 para una posicion cripto."""
+        """
+        Corutina de supervision 24/7 para una posicion cripto con Bracket Order.
+
+        Espera a que Alpaca cierre la posicion automaticamente (TP o SL),
+        luego recupera el precio de salida real de la orden ejecutada y
+        registra la salida en el trade log.
+
+        Si se supera el timeout CRYPTO_MAX_HOLD_HOURS, cancela las legs OCO
+        y ejecuta una venta a mercado.
+        """
         symbol = record.symbol
         logger.info(
-            f"[CRYPTO {symbol}] Supervision iniciada → "
+            f"[CRYPTO {symbol}] Monitor iniciado (Bracket) → "
             f"TP=${record.target_tp:.4f} | SL=${record.target_sl:.4f} | "
-            f"Max={CRYPTO_MAX_HOLD_HOURS}h"
+            f"Max={CRYPTO_MAX_HOLD_HOURS}h | BracketID={record.bracket_order_id or 'N/A'}"
         )
 
         while True:
             try:
                 await asyncio.sleep(CRYPTO_POLL_INTERVAL_SEC)
 
+                hours_held = record.hours_held
+
+                # ── Verificar si la posicion sigue abierta en Alpaca ──────────
                 current_price = await asyncio.get_event_loop().run_in_executor(
                     None, self._order_manager.get_latest_quote, symbol
                 )
 
+                # get_latest_quote retorna 0.0 si la posicion ya no existe
                 if current_price == 0.0:
                     logger.info(
-                        f"[CRYPTO {symbol}] Precio=0, posicion ya cerrada externamente."
+                        f"[CRYPTO {symbol}] Posicion cerrada por Alpaca "
+                        f"(TP o SL ejecutado automaticamente). "
+                        f"Recuperando precio de salida..."
                     )
+                    exit_price, exit_type = await self._get_broker_exit_info(record)
+                    await self._log_exit(record, exit_price, exit_type)
                     break
 
-                # Actualizar trailing SL
-                if current_price > record.highest_price:
-                    record.highest_price = current_price
-                    logger.debug(
-                        f"[CRYPTO {symbol}] Nuevo maximo: ${current_price:.4f} | "
-                        f"Trailing SL actualizado: ${record.target_sl:.4f}"
-                    )
-
-                hours_held = record.hours_held
-                pnl_pct = (current_price - record.entry_price) / record.entry_price
-
                 logger.debug(
-                    f"[CRYPTO {symbol}] Precio=${current_price:.4f} | "
-                    f"TP=${record.target_tp:.4f} | SL=${record.target_sl:.4f} | "
-                    f"Horas={hours_held:.1f}"
+                    f"[CRYPTO {symbol}] Posicion activa: precio=${current_price:.4f} | "
+                    f"Horas={hours_held:.1f}/{CRYPTO_MAX_HOLD_HOURS}"
                 )
 
-                exit_type = None
-
-                if current_price >= record.target_tp:
-                    exit_type = "CRYPTO_SELL_TP"
-                    logger.info(
-                        f"[CRYPTO {symbol}] TAKE PROFIT: "
-                        f"${current_price:.4f} >= ${record.target_tp:.4f} "
-                        f"(+{pnl_pct*100:.2f}%)"
-                    )
-                elif current_price <= record.target_sl:
-                    exit_type = "CRYPTO_SELL_SL"
+                # ── Fallback de timeout: forzar cierre si supera max horas ───
+                if hours_held >= CRYPTO_MAX_HOLD_HOURS:
                     logger.warning(
-                        f"[CRYPTO {symbol}] STOP LOSS: "
-                        f"${current_price:.4f} <= ${record.target_sl:.4f} "
-                        f"({pnl_pct*100:.2f}%)"
+                        f"[CRYPTO {symbol}] TIMEOUT ({hours_held:.1f}h). "
+                        f"Cancelando legs OCO y ejecutando venta a mercado..."
                     )
-                elif hours_held >= CRYPTO_MAX_HOLD_HOURS:
-                    exit_type = "CRYPTO_SELL_TIME"
-                    logger.info(
-                        f"[CRYPTO {symbol}] MAXIMO DE HORAS: "
-                        f"{hours_held:.1f}h >= {CRYPTO_MAX_HOLD_HOURS}h | "
-                        f"P&L: {pnl_pct*100:.2f}%"
-                    )
-
-                if exit_type is not None:
-                    await self._execute_exit(record, current_price, exit_type)
+                    await self._execute_timeout_exit(record, current_price)
                     break
 
             except asyncio.CancelledError:
@@ -241,56 +239,149 @@ class CryptoPositionSupervisor:
                     "Reintentando en el siguiente ciclo..."
                 )
 
-    async def _execute_exit(
+    async def _get_broker_exit_info(
+        self, record: CryptoPositionRecord
+    ) -> tuple[float, str]:
+        """
+        Recupera el precio de salida real y el tipo de cierre desde las
+        ordenes ejecutadas en Alpaca.
+
+        Busca ordenes de venta (SELL) en estado 'filled' para el simbolo.
+        Si no encuentra informacion, usa el precio de TP calculado como
+        aproximacion y reporta como CRYPTO_SELL_TP.
+
+        Returns:
+            Tupla (exit_price, exit_type).
+        """
+        symbol = record.symbol
+        alpaca_symbol = symbol.replace("/", "")
+
+        try:
+            from alpaca.trading.requests import GetOrdersRequest
+            from alpaca.trading.enums import QueryOrderStatus, OrderSide as AlpacaSide
+
+            req = GetOrdersRequest(
+                status=QueryOrderStatus.CLOSED,
+                symbols=[alpaca_symbol],
+                limit=10,
+            )
+            orders = await asyncio.get_event_loop().run_in_executor(
+                None, self._order_manager._client.get_orders, req
+            )
+
+            # Buscar la ultima orden de venta ejecutada para este simbolo
+            for order in orders:
+                if (
+                    hasattr(order, "side")
+                    and str(order.side) in ("OrderSide.SELL", "sell")
+                    and hasattr(order, "filled_avg_price")
+                    and order.filled_avg_price is not None
+                    and float(order.filled_avg_price) > 0
+                ):
+                    exit_price = float(order.filled_avg_price)
+                    # Determinar tipo por comparacion con precios referencia
+                    if exit_price >= record.target_tp * 0.995:
+                        exit_type = "CRYPTO_SELL_TP"
+                    elif exit_price <= record.target_sl * 1.005:
+                        exit_type = "CRYPTO_SELL_SL"
+                    else:
+                        exit_type = "CRYPTO_SELL_TP"  # Default: asumir TP
+
+                    logger.info(
+                        f"[CRYPTO {symbol}] Salida detectada desde orden broker: "
+                        f"precio=${exit_price:.6f} | tipo={exit_type} | "
+                        f"OrderID={order.id}"
+                    )
+                    return exit_price, exit_type
+
+        except Exception as exc:
+            logger.warning(
+                f"[CRYPTO {symbol}] No se pudo recuperar orden de venta: {exc}. "
+                "Usando precio TP calculado como aproximacion."
+            )
+
+        # Fallback: asumir TP con el precio objetivo calculado
+        logger.warning(
+            f"[CRYPTO {symbol}] Usando precio TP calculado como fallback: "
+            f"${record.target_tp:.6f}"
+        )
+        return record.target_tp, "CRYPTO_SELL_TP"
+
+    async def _log_exit(
         self,
         record: CryptoPositionRecord,
         exit_price: float,
         exit_type: str,
     ) -> None:
-        """Ejecuta la venta y registra la operacion en el trade log."""
+        """Registra la salida en el trade log y elimina la posicion del registro."""
         symbol = record.symbol
-        success = False
-        try:
-            order = await asyncio.get_event_loop().run_in_executor(
-                None, self._order_manager.submit_sell, symbol, record.qty
+        pnl = (exit_price - record.entry_price) * record.qty
+        pnl_pct = (exit_price - record.entry_price) / record.entry_price
+
+        trade_data = {
+            "ticker": symbol,
+            "trade_type": exit_type,
+            "notional": record.notional,
+            "entry_price": record.entry_price,
+            "exit_price": exit_price,
+            "qty": record.qty,
+            "pnl": round(pnl, 6),
+            "pnl_pct": round(pnl_pct, 6),
+            "kelly_pct": record.kelly_pct,
+            "atr_at_entry": record.atr_at_entry,
+            "entry_time": record.entry_time.strftime("%Y-%m-%d %H:%M:%S") if record.entry_time else "N/A",
+        }
+        self._trade_logger.log_crypto_exit(trade_data)
+
+        pnl_sign = "+" if pnl >= 0 else ""
+        logger.info(
+            f"[CRYPTO {symbol}] Salida registrada [{exit_type}]: "
+            f"P&L={pnl_sign}${pnl:.4f} ({pnl_sign}{pnl_pct*100:.2f}%) | "
+            f"Precio=${exit_price:.4f}"
+        )
+
+        async with self._lock:
+            self._positions.pop(symbol, None)
+
+    async def _execute_timeout_exit(
+        self, record: CryptoPositionRecord, current_price: float
+    ) -> None:
+        """
+        Fallback de timeout: cancela las legs OCO pendientes y envia una
+        orden de venta a mercado para cerrar la posicion forzadamente.
+        """
+        symbol = record.symbol
+
+        # Intentar cancelar la orden bracket original si aun esta pendiente
+        if record.bracket_order_id:
+            try:
+                await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    self._order_manager._client.cancel_order_by_id,
+                    record.bracket_order_id,
+                )
+                logger.info(
+                    f"[CRYPTO {symbol}] Orden bracket {record.bracket_order_id} cancelada."
+                )
+            except Exception as exc:
+                logger.warning(
+                    f"[CRYPTO {symbol}] No se pudo cancelar bracket: {exc}. "
+                    "Continuando con venta a mercado..."
+                )
+
+        # Venta a mercado como fallback
+        order = await asyncio.get_event_loop().run_in_executor(
+            None, self._order_manager.submit_sell, symbol, record.qty
+        )
+
+        if order is None:
+            logger.error(
+                f"[CRYPTO {symbol}] Fallo la venta a mercado por timeout. "
+                "Posicion puede estar aun abierta en Alpaca."
             )
+            return
 
-            if order is None:
-                logger.error(f"[CRYPTO {symbol}] Orden de venta retorno None. Manteniendo posicion.")
-                return
-
-            pnl = (exit_price - record.entry_price) * record.qty
-            pnl_pct = (exit_price - record.entry_price) / record.entry_price
-
-            trade_data = {
-                "ticker": symbol,
-                "trade_type": exit_type,
-                "notional": record.notional,
-                "entry_price": record.entry_price,
-                "exit_price": exit_price,
-                "qty": record.qty,
-                "pnl": round(pnl, 6),
-                "pnl_pct": round(pnl_pct, 6),
-                "kelly_pct": record.kelly_pct,
-                "atr_at_entry": record.atr_at_entry,
-                "entry_time": record.entry_time.strftime("%Y-%m-%d %H:%M:%S") if record.entry_time else "N/A",
-            }
-            self._trade_logger.log_crypto_exit(trade_data)
-
-            pnl_sign = "+" if pnl >= 0 else ""
-            logger.info(
-                f"[CRYPTO {symbol}] Salida [{exit_type}]: "
-                f"P&L={pnl_sign}${pnl:.4f} ({pnl_sign}{pnl_pct*100:.2f}%) | "
-                f"Precio=${exit_price:.4f}"
-            )
-            success = True
-
-        except Exception as exc:
-            logger.error(f"[CRYPTO {symbol}] Error ejecutando salida: {exc}")
-        finally:
-            if success:
-                async with self._lock:
-                    self._positions.pop(symbol, None)
+        await self._log_exit(record, current_price, "CRYPTO_SELL_TIME")
 
     def start(self) -> None:
         """Lanza corutinas de supervision para todas las posiciones registradas."""
@@ -301,7 +392,7 @@ class CryptoPositionSupervisor:
                     name=f"crypto_supervisor_{symbol.replace('/', '_')}",
                 )
                 record.task = task
-                logger.info(f"[CRYPTO {symbol}] Tarea de supervision lanzada.")
+                logger.info(f"[CRYPTO {symbol}] Monitor de posicion bracket lanzado.")
 
     def stop_all(self) -> None:
         """Cancela todas las corutinas de supervision activas."""
