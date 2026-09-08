@@ -448,6 +448,10 @@ def get_crypto_trades():
 
         for row in rows:
             ticker = row["ticker"]
+            # Normalize 'BTCUSD' to 'BTC/USD' so it pairs correctly
+            if "/" not in ticker and ticker.endswith("USD"):
+                ticker = ticker[:-3] + "/USD"
+            
             if row["trade_type"] == "CRYPTO_BUY":
                 pending_buys[ticker].append(row)
             elif row["trade_type"].startswith("CRYPTO_SELL"):
