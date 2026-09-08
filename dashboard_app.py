@@ -4,6 +4,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from typing import Optional
 import config
 from dotenv import load_dotenv
 
@@ -666,6 +667,185 @@ def get_crypto_chart_data(symbol: str, entry_price: float = None):
             }
 
         return {"bars": bars, "levels": levels}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─── Pydantic models for manual close ────────────────────────────────────────
+
+class CloseTradeRequest(BaseModel):
+    ticker: str
+    buy_id: Optional[int] = None  # for traceability only (not used in the order)
+    qty: float
+    entry_price: float
+
+
+class CloseCryptoTradeRequest(BaseModel):
+    ticker: str   # e.g. 'BTC/USD'
+    qty: float
+    entry_price: float
+
+
+# ─── Manual Close Endpoints ───────────────────────────────────────────────────
+
+@app.post("/api/close-trade")
+def close_equity_trade(payload: CloseTradeRequest):
+    """
+    Manually closes an open equity position.
+
+    Steps:
+      1. Fetch current price from Alpaca (via open position).
+      2. Execute market sell order via OrderManager.submit_sell().
+      3. Calculate P&L.
+      4. Log SELL_MANUAL to SQLite trades table via TradeLogger.
+      5. Return { success, exit_price, pnl, pnl_pct }.
+    """
+    import os
+    from execution.orders import OrderManager
+    from logging_.trade_log import TradeLogger
+
+    API_KEY = os.getenv("ALPACA_API_KEY")
+    SECRET_KEY = os.getenv("ALPACA_SECRET_KEY")
+
+    if not (API_KEY and SECRET_KEY):
+        raise HTTPException(
+            status_code=503,
+            detail="Alpaca API keys not configured. Cannot execute manual close."
+        )
+
+    try:
+        order_mgr = OrderManager(API_KEY, SECRET_KEY)
+
+        # 1. Get current price from Alpaca position
+        current_price = order_mgr.get_latest_quote(payload.ticker)
+        if current_price == 0.0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"No open position found for {payload.ticker} in Alpaca. "
+                       "It may have already been closed."
+            )
+
+        # 2. Execute market sell
+        order = order_mgr.submit_sell(payload.ticker, payload.qty)
+        if order is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Alpaca rejected the sell order for {payload.ticker}. "
+                       "Check Alpaca logs for details (market may be closed)."
+            )
+
+        # 3. Calculate P&L
+        pnl = (current_price - payload.entry_price) * payload.qty
+        pnl_pct = (current_price - payload.entry_price) / payload.entry_price
+        notional = payload.entry_price * payload.qty
+
+        # 4. Log SELL_MANUAL to SQLite
+        trade_logger = TradeLogger()
+        trade_data = {
+            "ticker": payload.ticker,
+            "trade_type": "SELL_MANUAL",
+            "notional": round(notional, 4),
+            "entry_price": payload.entry_price,
+            "exit_price": current_price,
+            "qty": payload.qty,
+            "pnl": round(pnl, 4),
+            "pnl_pct": round(pnl_pct, 6),
+            "kelly_pct": None,
+            "entry_time": "N/A",
+        }
+        trade_logger.log_exit(trade_data)
+
+        return {
+            "success": True,
+            "ticker": payload.ticker,
+            "exit_price": current_price,
+            "pnl": round(pnl, 4),
+            "pnl_pct": round(pnl_pct, 6),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/crypto/close-trade")
+def close_crypto_trade(payload: CloseCryptoTradeRequest):
+    """
+    Manually closes an open crypto position.
+
+    Steps:
+      1. Fetch current price from Alpaca crypto position.
+      2. Execute market sell order via CryptoOrderManager.submit_sell().
+      3. Calculate P&L.
+      4. Log CRYPTO_SELL_MANUAL to SQLite crypto_trades table via TradeLogger.
+      5. Return { success, exit_price, pnl, pnl_pct }.
+    """
+    import os
+    from execution.crypto_orders import CryptoOrderManager
+    from logging_.trade_log import TradeLogger
+
+    API_KEY = os.getenv("ALPACA_API_KEY")
+    SECRET_KEY = os.getenv("ALPACA_SECRET_KEY")
+
+    if not (API_KEY and SECRET_KEY):
+        raise HTTPException(
+            status_code=503,
+            detail="Alpaca API keys not configured. Cannot execute manual close."
+        )
+
+    try:
+        order_mgr = CryptoOrderManager(API_KEY, SECRET_KEY)
+
+        # 1. Get current price from Alpaca position
+        current_price = order_mgr.get_latest_quote(payload.ticker)
+        if current_price == 0.0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"No open position found for {payload.ticker} in Alpaca. "
+                       "It may have already been closed."
+            )
+
+        # 2. Execute market sell
+        order = order_mgr.submit_sell(payload.ticker, payload.qty)
+        if order is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Alpaca rejected the sell order for {payload.ticker}."
+            )
+
+        # 3. Calculate P&L
+        pnl = (current_price - payload.entry_price) * payload.qty
+        pnl_pct = (current_price - payload.entry_price) / payload.entry_price
+        notional = payload.entry_price * payload.qty
+
+        # 4. Log CRYPTO_SELL_MANUAL to SQLite
+        trade_logger = TradeLogger()
+        trade_data = {
+            "ticker": payload.ticker,
+            "trade_type": "CRYPTO_SELL_MANUAL",
+            "notional": round(notional, 6),
+            "entry_price": payload.entry_price,
+            "exit_price": current_price,
+            "qty": payload.qty,
+            "pnl": round(pnl, 6),
+            "pnl_pct": round(pnl_pct, 6),
+            "kelly_pct": None,
+            "atr_at_entry": None,
+            "entry_time": "N/A",
+        }
+        trade_logger.log_crypto_exit(trade_data)
+
+        return {
+            "success": True,
+            "ticker": payload.ticker,
+            "exit_price": current_price,
+            "pnl": round(pnl, 6),
+            "pnl_pct": round(pnl_pct, 6),
+        }
 
     except HTTPException:
         raise

@@ -126,11 +126,12 @@ async function fetchTrades() {
                 badgeLabel = '● OPEN';
             } else {
                 const st = (trade.sell_type || '').toLowerCase();
-                if (st.includes('tp'))       { badgeClass = 'trade-type sell-tp'; badgeLabel = '✔ SELL_TP'; }
-                else if (st.includes('sl'))  { badgeClass = 'trade-type sell-sl'; badgeLabel = '✘ SELL_SL'; }
-                else if (st.includes('eow')) { badgeClass = 'trade-type sell';    badgeLabel = '⏰ SELL_EOW'; }
-                else if (st.includes('5d'))  { badgeClass = 'trade-type sell';    badgeLabel = '📅 SELL_5D'; }
-                else                         { badgeClass = 'trade-type sell';    badgeLabel = trade.sell_type || 'CLOSED'; }
+                if (st.includes('tp'))         { badgeClass = 'trade-type sell-tp';     badgeLabel = '✔ SELL_TP'; }
+                else if (st.includes('sl'))    { badgeClass = 'trade-type sell-sl';     badgeLabel = '✘ SELL_SL'; }
+                else if (st.includes('eow'))   { badgeClass = 'trade-type sell';        badgeLabel = '⏰ SELL_EOW'; }
+                else if (st.includes('5d'))    { badgeClass = 'trade-type sell';        badgeLabel = '📅 SELL_5D'; }
+                else if (st.includes('manual')){ badgeClass = 'trade-type sell-manual'; badgeLabel = '🔒 MANUAL'; }
+                else                           { badgeClass = 'trade-type sell';        badgeLabel = trade.sell_type || 'CLOSED'; }
             }
 
             let pnlHTML    = '<span class="muted">—</span>';
@@ -189,6 +190,11 @@ async function fetchTrades() {
                     <td class="mono"><span class="muted">—</span></td>
                     <td>${pnlHTML}</td>
                     <td>${pnlPctHTML}</td>
+                    <td>
+                        <button class="btn-close-trade" onclick="event.stopPropagation(); openCloseModal('equity', '${trade.ticker}', ${trade.buy_id ?? 'null'}, ${trade.qty || 0}, ${trade.entry_price || 0})">
+                            &#x26A1; Cerrar
+                        </button>
+                    </td>
                 `;
                 openTbody.appendChild(tr);
                 openCount++;
@@ -196,10 +202,10 @@ async function fetchTrades() {
         });
 
         if (openCount === 0) {
-            openTbody.innerHTML = '<tr><td colspan="9" class="text-center">No open positions.</td></tr>';
+            openTbody.innerHTML = '<tr><td colspan="12" class="text-center">No open positions.</td></tr>';
         }
         if (closedCount === 0) {
-            closedTbody.innerHTML = '<tr><td colspan="10" class="text-center">No closed trades found.</td></tr>';
+            closedTbody.innerHTML = '<tr><td colspan="12" class="text-center">No closed trades found.</td></tr>';
         }
 
     } catch (error) {
@@ -507,6 +513,8 @@ async function fetchCryptoTrades() {
                     typeBadge = '<span class="trade-type sell-sl">✘ SELL_SL</span>';
                 } else if (st.includes('TIME') || st.includes('72H') || st.includes('EOW')) {
                     typeBadge = `<span class="trade-type sell">⏰ ${t.sell_type}</span>`;
+                } else if (st.includes('MANUAL')) {
+                    typeBadge = '<span class="trade-type sell-manual">🔒 MANUAL</span>';
                 } else {
                     typeBadge = `<span class="trade-type sell">${t.sell_type || 'CLOSED'}</span>`;
                 }
@@ -549,6 +557,11 @@ async function fetchCryptoTrades() {
                     <td>${t.atr_at_entry ? parseFloat(t.atr_at_entry).toFixed(4) : '-'}</td>
                     <td class="${pnlClass}">${pnl !== null ? formatCurrency(pnl) : '-'}</td>
                     <td class="${pnlClass}">${t.pnl_pct !== null ? (t.pnl_pct * 100).toFixed(2) + '%' : '-'}</td>
+                    <td>
+                        <button class="btn-close-trade" onclick="event.stopPropagation(); openCloseModal('crypto', '${t.ticker || ''}', null, ${t.qty || 0}, ${t.entry_price || 0})">
+                            &#x26A1; Cerrar
+                        </button>
+                    </td>
                 `;
                 const sym = (t.ticker || '').replace('/USD', '');
                 const chartPrice = t.entry_price ? parseFloat(t.entry_price) : null;
@@ -559,10 +572,10 @@ async function fetchCryptoTrades() {
         });
 
         if (openCount === 0) {
-            openTbody.innerHTML = '<tr><td colspan="9" class="text-center">No open positions.</td></tr>';
+            openTbody.innerHTML = '<tr><td colspan="12" class="text-center">No open positions.</td></tr>';
         }
         if (closedCount === 0) {
-            closedTbody.innerHTML = '<tr><td colspan="10" class="text-center">No crypto trades yet.</td></tr>';
+            closedTbody.innerHTML = '<tr><td colspan="12" class="text-center">No crypto trades yet.</td></tr>';
         }
     } catch (e) {
         console.error('fetchCryptoTrades error:', e);
@@ -665,3 +678,96 @@ async function openCryptoChartModal(symbol, entryPrice) {
     }
 }
 
+// ─── Manual Close Trade Modal ──────────────────────────────────────────────────
+
+// State of the pending close operation
+let pendingClose = null;
+
+/**
+ * Opens the close-trade confirmation modal.
+ * @param {'equity'|'crypto'} type - The asset type.
+ * @param {string} ticker - Symbol (e.g. 'AAPL' or 'BTC/USD').
+ * @param {number|null} buyId - DB buy row ID (equity only).
+ * @param {number} qty - Quantity to sell.
+ * @param {number} entryPrice - Original buy price.
+ */
+function openCloseModal(type, ticker, buyId, qty, entryPrice) {
+    pendingClose = { type, ticker, buyId, qty, entryPrice };
+
+    document.getElementById('close-trade-ticker').textContent = ticker;
+    document.getElementById('close-trade-qty').textContent = qty.toFixed(type === 'crypto' ? 8 : 4);
+    document.getElementById('close-trade-entry').textContent = formatCurrency(entryPrice);
+
+    // Reset result area
+    const resultEl = document.getElementById('close-trade-result');
+    resultEl.className = 'close-trade-result hidden';
+    resultEl.textContent = '';
+
+    // Reset button
+    const btn = document.getElementById('close-trade-confirm-btn');
+    btn.disabled = false;
+    btn.innerHTML = '&#x26A1; Confirmar Cierre';
+
+    document.getElementById('close-trade-modal').style.display = 'flex';
+}
+
+function cancelCloseTrade() {
+    pendingClose = null;
+    document.getElementById('close-trade-modal').style.display = 'none';
+}
+
+async function confirmCloseTrade() {
+    if (!pendingClose) return;
+
+    const btn = document.getElementById('close-trade-confirm-btn');
+    btn.disabled = true;
+    btn.textContent = '⏳ Ejecutando...';
+
+    const { type, ticker, buyId, qty, entryPrice } = pendingClose;
+    const endpoint = type === 'crypto' ? '/api/crypto/close-trade' : '/api/close-trade';
+    const body = type === 'crypto'
+        ? { ticker, qty, entry_price: entryPrice }
+        : { ticker, buy_id: buyId, qty, entry_price: entryPrice };
+
+    const resultEl = document.getElementById('close-trade-result');
+
+    try {
+        const res = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+        const data = await res.json();
+
+        if (res.ok && data.success) {
+            const pnl = data.pnl ?? 0;
+            const pnlPct = data.pnl_pct ?? 0;
+            const pnlSign = pnl >= 0 ? '+' : '';
+            resultEl.className = 'close-trade-result success';
+            resultEl.innerHTML =
+                `✅ Cerrado a <strong>${formatCurrency(data.exit_price)}</strong> &nbsp;|&nbsp; ` +
+                `P&L: <strong>${pnlSign}${formatCurrency(pnl)}</strong> ` +
+                `(${pnlSign}${(pnlPct * 100).toFixed(2)}%)`;
+
+            // Auto-refresh all tables and KPIs after 1.8s
+            setTimeout(() => {
+                cancelCloseTrade();
+                fetchTrades();
+                fetchMetrics();
+                fetchBudget();
+                fetchCryptoTrades();
+                fetchCryptoMetrics();
+            }, 1800);
+        } else {
+            resultEl.className = 'close-trade-result error';
+            resultEl.textContent = `❌ Error: ${data.detail || data.error || 'Error desconocido'}`;
+            btn.disabled = false;
+            btn.innerHTML = '&#x26A1; Reintentar';
+        }
+    } catch (err) {
+        resultEl.className = 'close-trade-result error';
+        resultEl.textContent = `❌ Error de conexión: ${err.message}`;
+        btn.disabled = false;
+        btn.innerHTML = '&#x26A1; Reintentar';
+    }
+}

@@ -730,3 +730,135 @@ body {
 .price-updated {
     animation: priceUpdate 1s ease-out;
 }
+
+/* ══════════════════════════════════════════════════════════════════════════ */
+/* ── Manual Close Trade — Button & Modal ─────────────────────────────────  */
+/* ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── ⚡ Cerrar button in open positions table ── */
+.btn-close-trade {
+    background: rgba(239, 68, 68, 0.12);
+    border: 1px solid rgba(239, 68, 68, 0.35);
+    color: #ef4444;
+    padding: 4px 12px;
+    border-radius: 6px;
+    font-size: 0.73rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.18s ease;
+    white-space: nowrap;
+    letter-spacing: 0.03em;
+}
+.btn-close-trade:hover {
+    background: rgba(239, 68, 68, 0.28);
+    border-color: #ef4444;
+    box-shadow: 0 0 10px rgba(239, 68, 68, 0.25);
+    transform: translateY(-1px);
+}
+.btn-close-trade:active {
+    transform: translateY(0);
+}
+
+/* ── Close Confirmation Modal ── */
+.close-confirm-modal {
+    max-width: 500px;
+    width: 94%;
+    padding: 2rem;
+    animation: slideUp 0.22s ease-out;
+}
+.close-trade-info {
+    font-size: 1.05rem;
+    margin-bottom: 0.4rem;
+    color: var(--text-primary);
+}
+.close-trade-sub {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    margin-bottom: 1.25rem;
+}
+.close-warning {
+    font-size: 0.8rem;
+    color: #fbbf24;
+    margin-bottom: 1.5rem;
+    padding: 0.6rem 0.75rem;
+    border-left: 3px solid #f59e0b;
+    background: rgba(245, 158, 11, 0.07);
+    border-radius: 0 6px 6px 0;
+    line-height: 1.5;
+}
+
+/* ── Modal action buttons ── */
+.modal-actions {
+    display: flex;
+    gap: 0.75rem;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+}
+.btn-secondary {
+    background: rgba(255, 255, 255, 0.07);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: var(--text-secondary);
+    padding: 0.55rem 1.2rem;
+    border-radius: 8px;
+    font-size: 0.88rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.18s ease;
+}
+.btn-secondary:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: var(--text-primary);
+}
+.btn-danger {
+    background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+    color: #fff;
+    border: none;
+    padding: 0.55rem 1.4rem;
+    border-radius: 8px;
+    font-size: 0.88rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.18s ease;
+    box-shadow: 0 2px 12px rgba(239, 68, 68, 0.25);
+}
+.btn-danger:hover {
+    opacity: 0.88;
+    box-shadow: 0 4px 18px rgba(239, 68, 68, 0.4);
+    transform: translateY(-1px);
+}
+.btn-danger:active { transform: translateY(0); }
+.btn-danger:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+}
+
+/* ── Close trade result message ── */
+.close-trade-result {
+    margin-top: 1.1rem;
+    padding: 0.7rem 1rem;
+    border-radius: 8px;
+    font-size: 0.88rem;
+    font-weight: 600;
+    line-height: 1.5;
+}
+.close-trade-result.hidden { display: none; }
+.close-trade-result.success {
+    background: rgba(16, 185, 129, 0.12);
+    color: #34d399;
+    border: 1px solid rgba(16, 185, 129, 0.25);
+}
+.close-trade-result.error {
+    background: rgba(239, 68, 68, 0.12);
+    color: #f87171;
+    border: 1px solid rgba(239, 68, 68, 0.25);
+}
+
+/* ── 🔒 MANUAL badge in trade history ── */
+.trade-type.sell-manual {
+    background: rgba(139, 92, 246, 0.15);
+    color: #a78bfa;
+    border: 1px solid rgba(139, 92, 246, 0.3);
+}
+

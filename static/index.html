@@ -99,6 +99,7 @@
                                     <th>Duration</th>
                                     <th>P&amp;L</th>
                                     <th>P&amp;L %</th>
+                                    <th>Acción</th>
                                 </tr>
                             </thead>
                             <tbody id="trades-open-tbody">
@@ -184,6 +185,7 @@
                                     <th>ATR</th>
                                     <th>P&amp;L</th>
                                     <th>P&amp;L %</th>
+                                    <th>Acción</th>
                                 </tr>
                             </thead>
                             <tbody id="crypto-trades-open-tbody">
@@ -234,6 +236,33 @@
         </div>
     </div>
 
-    <script src="/static/app.js?v=6"></script>
+    <!-- Close Trade Confirmation Modal -->
+    <div id="close-trade-modal" class="modal">
+        <div class="modal-content glass-panel close-confirm-modal">
+            <div class="modal-header">
+                <h2>&#x26A0;&#xFE0F; Confirmar Cierre Manual</h2>
+                <button class="close-btn" onclick="cancelCloseTrade()" aria-label="Cancel close">&times;</button>
+            </div>
+            <p class="close-trade-info">
+                ¿Cerrar posición en <strong id="close-trade-ticker">---</strong>?
+            </p>
+            <p class="close-trade-sub">
+                Qty: <strong id="close-trade-qty">---</strong> &nbsp;|&nbsp;
+                Entrada: <strong id="close-trade-entry">---</strong>
+            </p>
+            <p class="close-warning">
+                &#x26A0; Esta acción ejecuta una orden de mercado real en Alpaca Paper Trading. Es irreversible.
+            </p>
+            <div class="modal-actions">
+                <button id="close-trade-cancel-btn" class="btn-secondary" onclick="cancelCloseTrade()">Cancelar</button>
+                <button id="close-trade-confirm-btn" class="btn-danger" onclick="confirmCloseTrade()">
+                    &#x26A1; Confirmar Cierre
+                </button>
+            </div>
+            <div id="close-trade-result" class="close-trade-result hidden"></div>
+        </div>
+    </div>
+
+    <script src="/static/app.js?v=7"></script>
 </body>
 </html>
