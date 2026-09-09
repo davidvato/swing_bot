@@ -797,11 +797,12 @@ Ejemplos de uso:
     screener = UniverseScreener(api_key, secret_key)
 
     # ─── Inicializar componentes de Cripto ────────────────────────────────────
-    crypto_order_manager = CryptoOrderManager(api_key, secret_key)
-    crypto_data_client = CryptoDataClient(api_key, secret_key)
-    crypto_supervisor = CryptoPositionSupervisor(crypto_order_manager, trade_logger)
-    crypto_screener = CryptoUniverseScreener()
-    logger.info("Modulo de criptomonedas inicializado (CoinGecko + Alpaca Crypto).")
+    # DESHABILITADO TEMPORALMENTE (Cripto no funcional)
+    # crypto_order_manager = CryptoOrderManager(api_key, secret_key)
+    # crypto_data_client = CryptoDataClient(api_key, secret_key)
+    # crypto_supervisor = CryptoPositionSupervisor(crypto_order_manager, trade_logger)
+    # crypto_screener = CryptoUniverseScreener()
+    # logger.info("Modulo de criptomonedas inicializado (CoinGecko + Alpaca Crypto).")
 
     # Inyectar dependencias en el scheduler (incluyendo el screener)
     init_scheduler(order_manager, supervisor, trade_logger, screener)
@@ -842,10 +843,10 @@ Ejemplos de uso:
         asyncio.run(
             run_main_loop(
                 order_manager, data_client, supervisor, trade_logger, screener,
-                crypto_data_client=crypto_data_client,
-                crypto_order_manager=crypto_order_manager,
-                crypto_supervisor=crypto_supervisor,
-                crypto_screener=crypto_screener,
+                crypto_data_client=None,
+                crypto_order_manager=None,
+                crypto_supervisor=None,
+                crypto_screener=None,
             )
         )
     except KeyboardInterrupt:

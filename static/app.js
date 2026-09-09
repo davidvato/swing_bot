@@ -3,12 +3,12 @@ document.addEventListener('DOMContentLoaded', () => {
     fetchBudget();
     fetchMetrics();
     fetchTrades();
-    fetchCryptoUniverse();
-    fetchCryptoMetrics();
-    fetchCryptoPrices();
-    fetchCryptoTrades();
+    // fetchCryptoUniverse();
+    // fetchCryptoMetrics();
+    // fetchCryptoPrices();
+    // fetchCryptoTrades();
     // Auto-refresh crypto prices every 60 seconds
-    setInterval(fetchCryptoPrices, 60000);
+    // setInterval(fetchCryptoPrices, 60000);
 });
 
 const formatCurrency = (val) => {
@@ -755,8 +755,8 @@ async function confirmCloseTrade() {
                 fetchTrades();
                 fetchMetrics();
                 fetchBudget();
-                fetchCryptoTrades();
-                fetchCryptoMetrics();
+                // fetchCryptoTrades();
+                // fetchCryptoMetrics();
             }, 1800);
         } else {
             resultEl.className = 'close-trade-result error';
@@ -791,7 +791,7 @@ async function syncFromAlpaca() {
             statusEl.textContent = '\u2705 Eq:' + eq + ' Cripto:' + cr + ' Pos:' + op;
             icon.textContent = '\u2705';
             fetchTrades();
-            fetchCryptoTrades();
+            // fetchCryptoTrades();
         } else {
             statusEl.textContent = '\u274C ' + (data.detail || 'Error');
             icon.textContent = '\uD83D\uDD04';
