@@ -83,7 +83,13 @@
                 </section>
 
                 <section class="trades-section glass-panel">
-                    <h2>Open Positions</h2>
+                    <div style="display:flex;align-items:center;gap:1rem;margin-bottom:0.5rem;">
+                        <h2 style="margin:0">Open Positions</h2>
+                        <button id="sync-btn" onclick="syncFromAlpaca()" title="Sincronizar posiciones desde Alpaca" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border:none;border-radius:8px;padding:0.35rem 0.9rem;font-size:0.85rem;cursor:pointer;display:flex;align-items:center;gap:0.4rem;transition:opacity .2s;">
+                            <span id="sync-icon">🔄</span> Sync Alpaca
+                        </button>
+                        <span id="sync-status" style="font-size:0.8rem;color:#94a3b8;"></span>
+                    </div>
                     <div class="table-responsive" style="margin-bottom: 2rem;">
                         <table class="modern-table">
                             <thead>
@@ -263,6 +269,6 @@
         </div>
     </div>
 
-    <script src="/static/app.js?v=7"></script>
+    <script src="/static/app.js?v=8"></script>
 </body>
 </html>

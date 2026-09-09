@@ -178,13 +178,25 @@ class OrderManager:
     @rate_limited
     def get_open_positions(self) -> list[Position]:
         """
-        Retorna todas las posiciones abiertas actualmente en la cuenta.
+        Retorna las posiciones abiertas de EQUITY (us_equity) en la cuenta.
+
+        Excluye explícitamente posiciones cripto para evitar que el supervisor
+        de equities intente cerrarlas con órdenes de bolsa inválidas para cripto.
 
         Returns:
-            Lista de objetos Position de Alpaca. Lista vacia si no hay posiciones.
+            Lista de objetos Position de Alpaca (solo us_equity).
         """
-        positions = self._client.get_all_positions()
-        logger.debug(f"Posiciones abiertas: {len(positions)}")
+        all_positions = self._client.get_all_positions()
+        # Filtrar solo equities — cripto tiene asset_class == 'crypto'
+        positions = [
+            p for p in all_positions
+            if str(getattr(p, "asset_class", "us_equity")) != "AssetClass.CRYPTO"
+            and str(getattr(p, "asset_class", "us_equity")) != "crypto"
+        ]
+        logger.debug(
+            f"Posiciones abiertas: {len(positions)} equity "
+            f"(total Alpaca: {len(all_positions)})"
+        )
         return positions
 
     @rate_limited

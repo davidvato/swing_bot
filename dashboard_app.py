@@ -70,8 +70,67 @@ def _seed_db_if_empty():
         print(f"[SEED] Error al sembrar DB: {e}")
 
 
-# Ejecutar seed al importar el modulo (antes de que FastAPI atienda requests)
+def _auto_sync_from_alpaca() -> None:
+    """
+    Sincroniza automáticamente trades.db con las órdenes y posiciones
+    abiertas de Alpaca al arrancar el dashboard.
+
+    Esencial en Render donde el filesystem es efímero: el DB arranca vacío
+    en cada deploy y este paso lo rellena con el estado real de Alpaca.
+    Corre en un hilo separado para no bloquear el arranque de FastAPI.
+    """
+    import threading
+
+    def _sync():
+        try:
+            from logging_.reconcile import AlpacaReconciler
+            API_KEY = os.getenv("ALPACA_API_KEY")
+            SECRET_KEY = os.getenv("ALPACA_SECRET_KEY")
+            PAPER = os.getenv("ALPACA_PAPER", "True").lower() == "true"
+            if not (API_KEY and SECRET_KEY):
+                return
+            reconciler = AlpacaReconciler(API_KEY, SECRET_KEY, config.DB_PATH, paper=PAPER)
+            res = reconciler.sync()
+            print(
+                f"[AUTO-SYNC] Alpaca→DB completado: "
+                f"equities={res['equities_inserted']}, "
+                f"cripto={res['crypto_inserted']}, "
+                f"posiciones_abiertas={res.get('open_positions_inserted', 0)}"
+            )
+        except Exception as e:
+            print(f"[AUTO-SYNC] Error sincronizando con Alpaca: {e}")
+
+    threading.Thread(target=_sync, daemon=True, name="alpaca-auto-sync").start()
+
+
+# Ejecutar seed y auto-sync al importar el módulo
 _seed_db_if_empty()
+_auto_sync_from_alpaca()
+
+@app.post("/api/sync")
+def trigger_sync():
+    """
+    Fuerza una sincronización inmediata Alpaca → trades.db.
+
+    Útil cuando el dashboard muestra posiciones faltantes después de un
+    reinicio de Render o cuando se han hecho operaciones manualmente en Alpaca.
+    Devuelve un resumen de los registros insertados.
+    """
+    try:
+        from logging_.reconcile import AlpacaReconciler
+        API_KEY = os.getenv("ALPACA_API_KEY")
+        SECRET_KEY = os.getenv("ALPACA_SECRET_KEY")
+        PAPER = os.getenv("ALPACA_PAPER", "True").lower() == "true"
+        if not (API_KEY and SECRET_KEY):
+            raise HTTPException(status_code=503, detail="Credenciales Alpaca no configuradas.")
+        reconciler = AlpacaReconciler(API_KEY, SECRET_KEY, config.DB_PATH, paper=PAPER)
+        res = reconciler.sync()
+        return {"status": "ok", **res}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/api/config")
 def get_bot_config():
