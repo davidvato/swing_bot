@@ -636,13 +636,21 @@ async def run_main_loop(
     
     trade_logger.notifier.send_message("🚀 <b>Swing Trading Bot Iniciado</b>\nModo Producción Activo (Paper Trading)")
 
-    # Rehidratacion de estado asincrona
-    logger.info("Re-hidratando estado de posiciones activas...")
+    # Rehidratacion de estado asincrona al arranque (Equities + Cripto)
+    logger.info("Re-hidratando estado de posiciones activas (Equities)...")
     rehydrated = await asyncio.get_event_loop().run_in_executor(
         None, supervisor.rehydrate_positions
     )
     if rehydrated > 0:
         supervisor.start()
+
+    if crypto_supervisor is not None:
+        logger.info("Re-hidratando estado de posiciones activas (Cripto)...")
+        c_rehydrated = await asyncio.get_event_loop().run_in_executor(
+            None, crypto_supervisor.rehydrate_positions
+        )
+        if c_rehydrated > 0:
+            crypto_supervisor.start()
 
     signals_run_today = False
     last_signal_date = None
