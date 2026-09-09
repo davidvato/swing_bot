@@ -110,9 +110,22 @@ class AlpacaReconciler:
             )
         return resp.json()
 
+    def fetch_open_positions(self) -> list[dict]:
+        """Obtiene las posiciones abiertas actuales en Alpaca."""
+        url = f"{self.base_url}/v2/positions"
+        resp = requests.get(url, headers=self.headers)
+        if resp.status_code != 200:
+            return []
+        return resp.json()
+
     def sync(self) -> dict:
         """
         Ejecuta el pipeline completo de reconciliación FIFO y persiste en SQLite.
+
+        1. Usa el campo `asset_class` de Alpaca para clasificar equity vs cripto
+           (elimina la heurística de símbolo que causaba falsos positivos).
+        2. Reconcilia posiciones abiertas en Alpaca que no tienen BUY en DB
+           (inserta registros faltantes de compras recientes).
 
         Returns:
             Diccionario resumen con conteo de registros insertados.
@@ -124,9 +137,11 @@ class AlpacaReconciler:
         crypto_orders = []
 
         for o in orders:
+            # Usar asset_class del objeto orden si está disponible;
+            # si no, distinguir por '/' en el símbolo (formato cripto de Alpaca)
+            asset_class = o.get("asset_class", "")
             sym = o.get("symbol", "")
-            # Cripto en Alpaca tiene '/' (ej. 'BTC/USD') o termina en 'USD' siendo par de cripto
-            if "/" in sym or sym.endswith("USD") and sym not in ("USD",):
+            if asset_class == "crypto" or "/" in sym:
                 crypto_orders.append(o)
             else:
                 equities_orders.append(o)
@@ -134,14 +149,133 @@ class AlpacaReconciler:
         inserted_eq = self._reconcile_orders(equities_orders, is_crypto=False)
         inserted_crypto = self._reconcile_orders(crypto_orders, is_crypto=True)
 
+        # Paso 2: sincronizar posiciones abiertas que el bot tiene en Alpaca
+        # pero cuya compra no quedó registrada en trades.db (ej. compras recientes
+        # posteriores al último --sync-trades)
+        pos_inserted = self._reconcile_open_positions()
+
+        total_inserted = inserted_eq + inserted_crypto + pos_inserted
         logger.info(
-            f"Sincronización completada. Insertados: Equities={inserted_eq}, Cripto={inserted_crypto}"
+            f"Sincronización completada. Insertados: Equities={inserted_eq}, "
+            f"Cripto={inserted_crypto}, Posiciones abiertas faltantes={pos_inserted}"
         )
         return {
             "total_alpaca_orders": len(orders),
             "equities_inserted": inserted_eq,
             "crypto_inserted": inserted_crypto,
+            "open_positions_inserted": pos_inserted,
         }
+
+    def _reconcile_open_positions(self) -> int:
+        """
+        Consulta las posiciones abiertas en Alpaca e inserta un registro BUY en DB
+        para cualquier posición que no tenga un BUY sin parear en la tabla correspondiente.
+
+        Resuelve el problema de compras recientes que ocurren entre ejecuciones de sync.
+
+        Returns:
+            Número de registros BUY insertados.
+        """
+        from collections import defaultdict, deque
+
+        open_positions = self.fetch_open_positions()
+        if not open_positions:
+            return 0
+
+        inserted = 0
+
+        # Construir el conjunto de tickers con BUYs sin parear en cada tabla
+        def get_unmatched_buys(table: str) -> set:
+            pending = defaultdict(deque)
+            with sqlite3.connect(self.db_path) as conn:
+                cur = conn.cursor()
+                # Check table exists
+                cur.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,)
+                )
+                if not cur.fetchone():
+                    return set()
+                cur.execute(f"SELECT ticker, trade_type FROM {table} ORDER BY date ASC, id ASC")
+                for ticker, trade_type in cur.fetchall():
+                    if trade_type == "BUY":
+                        pending[ticker].append(True)
+                    elif trade_type.startswith("SELL") and pending[ticker]:
+                        pending[ticker].popleft()
+            return {t for t, q in pending.items() if q}
+
+        eq_open = get_unmatched_buys("trades")
+        crypto_open = get_unmatched_buys(CRYPTO_DB_TABLE)
+
+        with sqlite3.connect(self.db_path) as conn:
+            cur = conn.cursor()
+            for pos in open_positions:
+                if not isinstance(pos, dict):
+                    continue
+
+                sym = pos.get("symbol", "")
+                asset_class = pos.get("asset_class", "")
+                qty = float(pos.get("qty", 0) or 0)
+                market_val = abs(float(pos.get("market_value", 0) or 0))
+
+                # Skip dust
+                if qty < 1e-6 or market_val < 1.0:
+                    continue
+
+                avg_entry = float(pos.get("avg_entry_price", 0) or 0)
+                is_crypto = asset_class == "crypto" or "/" in sym
+
+                # Normalize ticker: for crypto, use 'BTC/USD' format
+                if is_crypto and "/" not in sym and sym.endswith("USD"):
+                    ticker = f"{sym[:-3]}/USD"
+                else:
+                    ticker = sym
+
+                table = CRYPTO_DB_TABLE if is_crypto else "trades"
+                already_open = crypto_open if is_crypto else eq_open
+
+                if ticker in already_open or sym in already_open:
+                    continue  # Already has an unmatched BUY in DB
+
+                notional = market_val
+                now_str = datetime.now(
+                    __import__("pytz").timezone("America/New_York")
+                ).strftime("%Y-%m-%d %H:%M:%S EST")
+
+                # Check not already inserted (idempotency on avg_entry_price)
+                cur.execute(
+                    f"SELECT COUNT(*) FROM {table} WHERE ticker = ? AND trade_type = 'BUY' AND ABS(entry_price - ?) < 0.01",
+                    (ticker, avg_entry),
+                )
+                if cur.fetchone()[0] > 0:
+                    continue
+
+                if is_crypto:
+                    cur.execute(
+                        f"""
+                        INSERT INTO {table}
+                            (date, ticker, trade_type, notional, entry_price, exit_price, qty, pnl, pnl_pct, kelly_pct, atr_at_entry)
+                        VALUES (?, ?, 'BUY', ?, ?, NULL, ?, NULL, NULL, 0.05, NULL)
+                        """,
+                        (now_str, ticker, notional, avg_entry, qty),
+                    )
+                else:
+                    cur.execute(
+                        f"""
+                        INSERT INTO {table}
+                            (date, ticker, trade_type, notional, entry_price, exit_price, qty, pnl, pnl_pct, kelly_pct)
+                        VALUES (?, ?, 'BUY', ?, ?, NULL, ?, NULL, NULL, 0.15)
+                        """,
+                        (now_str, ticker, notional, avg_entry, qty),
+                    )
+
+                logger.info(
+                    f"[Reconciler] Posición abierta insertada en DB: {ticker} (tabla={table}) @ ${avg_entry}"
+                )
+                inserted += 1
+
+            conn.commit()
+
+        return inserted
 
     def _reconcile_orders(self, orders: list[dict], is_crypto: bool) -> int:
         table_name = CRYPTO_DB_TABLE if is_crypto else "trades"
