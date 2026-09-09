@@ -31,6 +31,8 @@ from alpaca.trading.requests import (
 )
 from alpaca.trading.enums import OrderSide, TimeInForce
 
+from config import CRYPTO_MAX_POSITION_PCT
+
 logger = logging.getLogger(__name__)
 
 
@@ -202,17 +204,81 @@ class CryptoOrderManager:
         except Exception:
             return 0.0
 
-    def get_open_positions(self) -> list:
-        """Retorna todas las posiciones cripto abiertas en Alpaca."""
+    def get_open_positions(self, include_dust: bool = False) -> list:
+        """
+        Retorna todas las posiciones cripto abiertas en Alpaca.
+
+        Args:
+            include_dust: Si False, ignora residuos con valor < $1 USD o qty trivial.
+        """
         try:
             all_positions = self._client.get_all_positions()
-            # Filtrar solo posiciones cripto (symbol contiene 'USD' y no es equity)
-            # Alpaca distingue por asset_class
-            crypto_positions = [
-                p for p in all_positions
-                if hasattr(p, "asset_class") and str(p.asset_class) == "AssetClass.CRYPTO"
-            ]
+            crypto_positions = []
+            for p in all_positions:
+                sym = p.symbol
+                is_crypto = (
+                    (hasattr(p, "asset_class") and "crypto" in str(p.asset_class).lower())
+                    or "/" in sym
+                    or (sym.endswith("USD") and sym not in ("AAPL", "MSFT", "NVDA", "GOOG", "AMZN", "META", "TSLA", "AVGO", "PLTR", "AMD", "SPY"))
+                )
+                if not is_crypto:
+                    continue
+
+                if not include_dust:
+                    market_val = abs(float(p.market_value)) if p.market_value else 0.0
+                    qty = abs(float(p.qty)) if p.qty else 0.0
+                    if market_val < 1.0 or qty < 1e-6:
+                        continue  # Filtrar polvo residual (dust)
+
+                crypto_positions.append(p)
             return crypto_positions
         except Exception as exc:
             logger.error(f"[CRYPTO] Error obteniendo posiciones: {exc}")
             return []
+
+    def can_open_position(
+        self,
+        symbol: str,
+        notional: float,
+        max_pct: float = CRYPTO_MAX_POSITION_PCT,
+    ) -> tuple[bool, str]:
+        """
+        Valida rigurosamente los controles de riesgo cuantitativo antes de abrir posición:
+        1. Comprueba si el símbolo ya tiene una posición viva no trivial en Alpaca.
+        2. Comprueba que el nocional solicitado no exceda el límite del portafolio (5% del equity).
+        3. Previene la sobreacumulación (overexposure/portfolio heat) como la ocurrida en LINK/USD.
+
+        Args:
+            symbol: Par cripto (ej. 'BTC/USD').
+            notional: Importe nocional de la orden propuesta (USD).
+            max_pct: Porcentaje máximo permitido por posición (default: 5%).
+
+        Returns:
+            Tupla (is_allowed: bool, reason: str).
+        """
+        alpaca_sym = symbol.replace("/", "")
+        equity = self.get_account_equity()
+        if equity <= 0:
+            return False, "Equity no disponible o en cero en broker Alpaca."
+
+        # 1. Verificar si ya existe posición en el broker
+        open_positions = self.get_open_positions(include_dust=False)
+        for pos in open_positions:
+            if pos.symbol == alpaca_sym or pos.symbol == symbol:
+                mkt_val = float(pos.market_value) if pos.market_value else 0.0
+                return (
+                    False,
+                    f"Posicion activa existente en Alpaca: {pos.qty} tokens (~${mkt_val:.2f} USD). "
+                    f"Regla de riesgo: prohibido promediar a la baja o sobreacumular.",
+                )
+
+        # 2. Verificar límite individual del % de equity
+        max_allowed_notional = equity * max_pct * 1.02  # margen 2% por slippage
+        if notional > max_allowed_notional:
+            return (
+                False,
+                f"Nocional propuesto (${notional:.2f}) excede el techo del {max_pct*100:.1f}% "
+                f"del equity (${equity * max_pct:.2f} USD).",
+            )
+
+        return True, "OK"

@@ -435,6 +435,14 @@ async def run_crypto_signals(
     Completamente aislado del ciclo de equities.
     """
     logger.info("[CRYPTO] Iniciando ciclo de señales cripto...")
+
+    # Rehidratar y arrancar supervisión de posiciones vivas en Alpaca
+    rehydrated = await asyncio.get_event_loop().run_in_executor(
+        None, crypto_supervisor.rehydrate_positions
+    )
+    if rehydrated > 0:
+        crypto_supervisor.start()
+
     active_symbols = crypto_screener.get_active_universe()
     logger.info(f"[CRYPTO] Universo activo: {active_symbols}")
 
@@ -485,6 +493,20 @@ async def run_crypto_signals(
             continue
 
         if not generate_crypto_signal(df):
+            continue
+
+        # ── Control Cuantitativo de Riesgo: verificar broker & Portfolio Heat ───
+        can_open, risk_reason = await asyncio.get_event_loop().run_in_executor(
+            None,
+            crypto_order_manager.can_open_position,
+            symbol,
+            notional,
+            CRYPTO_MAX_POSITION_PCT,
+        )
+        if not can_open:
+            logger.warning(
+                f"[CRYPTO RISK] {symbol}: Orden omitida por gestion de riesgo: {risk_reason}"
+            )
             continue
 
         logger.info(f"[CRYPTO] {symbol}: SEÑAL DE COMPRA. Enviando orden bracket...")
@@ -704,6 +726,7 @@ Ejemplos de uso:
   python main.py --test-connection    # Verificar credenciales y equity
   python main.py --dry-run            # Ver señales sin operar
   python main.py --force-friday-close # Forzar liquidacion manual
+  python main.py --sync-trades        # Sincronizar ordenes de Alpaca a trades.db
         """,
     )
     parser.add_argument(
@@ -721,11 +744,32 @@ Ejemplos de uso:
         action="store_true",
         help="Forzar liquidacion total (para testing del scheduler).",
     )
+    parser.add_argument(
+        "--sync-trades",
+        action="store_true",
+        help="Auditar y sincronizar retroactivamente todas las ordenes de Alpaca a trades.db.",
+    )
 
     args = parser.parse_args()
 
     # Cargar credenciales
     api_key, secret_key = _load_credentials()
+
+    # ─── Modo: Sincronizacion de Trades ───────────────────────────────────────
+    if args.sync_trades:
+        from logging_.reconcile import AlpacaReconciler
+        from config import DB_PATH
+        logger.info("Iniciando reconciliacion retroactiva de ordenes desde Alpaca...")
+        reconciler = AlpacaReconciler(api_key, secret_key, DB_PATH, paper=True)
+        res = reconciler.sync()
+        print("\n" + "=" * 60)
+        print("  RECONCILIACION ALPACA -> TRADES.DB COMPLETADA")
+        print("=" * 60)
+        print(f"  Ordenes Alpaca auditadas: {res['total_alpaca_orders']}")
+        print(f"  Equities insertadas:     {res['equities_inserted']}")
+        print(f"  Cripto insertadas:       {res['crypto_inserted']}")
+        print("=" * 60 + "\n")
+        return
 
     # ─── Modo: Test de conexion ───────────────────────────────────────────────
     if args.test_connection:

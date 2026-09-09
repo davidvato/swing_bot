@@ -404,9 +404,65 @@ class CryptoPositionSupervisor:
         logger.info(f"CryptoSupervisor.stop_all(): {cancelled} tareas canceladas.")
 
     def is_position_active(self, symbol: str) -> bool:
-        """Verifica si un par cripto esta bajo supervision."""
-        return symbol in self._positions
+        """Verifica si un par cripto esta bajo supervision activa en memoria."""
+        if symbol in self._positions:
+            return True
+        alt_sym = symbol.replace("/", "")
+        for k in self._positions:
+            if k.replace("/", "") == alt_sym:
+                return True
+        return False
+
+    def rehydrate_positions(self) -> int:
+        """
+        Consulta las posiciones cripto abiertas en Alpaca y reanuda su supervision
+        si no estaban siendo supervisadas. Filtra residuos (dust < $1 USD).
+
+        Returns:
+            Cantidad de posiciones asimiladas.
+        """
+        try:
+            open_positions = self._order_manager.get_open_positions(include_dust=False)
+        except Exception as exc:
+            logger.error(f"[CRYPTO] Error rehidratando posiciones: {exc}")
+            return 0
+
+        rehydrated = 0
+        for pos in open_positions:
+            raw_sym = pos.symbol
+            # Formatear a par con '/' si es necesario (ej. 'BTCUSD' -> 'BTC/USD')
+            if "/" not in raw_sym and raw_sym.endswith("USD"):
+                base = raw_sym[:-3]
+                symbol = f"{base}/USD"
+            else:
+                symbol = raw_sym
+
+            if self.is_position_active(symbol):
+                continue
+
+            entry_price = float(pos.avg_entry_price) if pos.avg_entry_price else 0.0
+            qty = float(pos.qty) if pos.qty else 0.0
+            notional = float(pos.market_value) if pos.market_value else (entry_price * qty)
+
+            self.add_position(
+                symbol=symbol,
+                entry_price=entry_price,
+                qty=qty,
+                notional=notional,
+                kelly_pct=0.05,
+                atr_at_entry=None,
+                entry_time=datetime.now(timezone.utc),
+            )
+            rehydrated += 1
+
+        if rehydrated > 0:
+            logger.info(
+                f"[CRYPTO] Rehidratacion completada: {rehydrated} posiciones sincronizadas desde Alpaca."
+            )
+
+        return rehydrated
 
     def get_active_positions(self) -> dict[str, CryptoPositionRecord]:
         """Retorna el diccionario de posiciones cripto activas."""
         return {k: v for k, v in self._positions.items()}
+
