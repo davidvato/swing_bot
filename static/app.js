@@ -1,4 +1,4 @@
-﻿document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', () => {
     fetchConfig();
     fetchBudget();
     fetchMetrics();
@@ -123,19 +123,19 @@ async function fetchTrades() {
             let badgeClass, badgeLabel;
             if (!isClosed) {
                 badgeClass = 'trade-type buy';
-                badgeLabel = 'â— OPEN';
+                badgeLabel = 'ΓùÅ OPEN';
             } else {
                 const st = (trade.sell_type || '').toLowerCase();
-                if (st.includes('tp'))         { badgeClass = 'trade-type sell-tp';     badgeLabel = 'âœ” SELL_TP'; }
-                else if (st.includes('sl'))    { badgeClass = 'trade-type sell-sl';     badgeLabel = 'âœ˜ SELL_SL'; }
-                else if (st.includes('eow'))   { badgeClass = 'trade-type sell';        badgeLabel = 'â° SELL_EOW'; }
-                else if (st.includes('5d'))    { badgeClass = 'trade-type sell';        badgeLabel = 'ðŸ“… SELL_5D'; }
-                else if (st.includes('manual')){ badgeClass = 'trade-type sell-manual'; badgeLabel = 'ðŸ”’ MANUAL'; }
+                if (st.includes('tp'))         { badgeClass = 'trade-type sell-tp';     badgeLabel = 'Γ£ö SELL_TP'; }
+                else if (st.includes('sl'))    { badgeClass = 'trade-type sell-sl';     badgeLabel = 'Γ£ÿ SELL_SL'; }
+                else if (st.includes('eow'))   { badgeClass = 'trade-type sell';        badgeLabel = 'ΓÅ░ SELL_EOW'; }
+                else if (st.includes('5d'))    { badgeClass = 'trade-type sell';        badgeLabel = '≡ƒôà SELL_5D'; }
+                else if (st.includes('manual')){ badgeClass = 'trade-type sell-manual'; badgeLabel = '≡ƒöÆ MANUAL'; }
                 else                           { badgeClass = 'trade-type sell';        badgeLabel = trade.sell_type || 'CLOSED'; }
             }
 
-            let pnlHTML    = '<span class="muted">â€”</span>';
-            let pnlPctHTML = '<span class="muted">â€”</span>';
+            let pnlHTML    = '<span class="muted">ΓÇö</span>';
+            let pnlPctHTML = '<span class="muted">ΓÇö</span>';
             if (trade.pnl !== null && trade.pnl !== undefined) {
                 const c = trade.pnl >= 0 ? 'positive' : 'negative';
                 pnlHTML    = `<span class="${c}">${formatCurrency(trade.pnl)}</span>`;
@@ -144,11 +144,11 @@ async function fetchTrades() {
 
             const durHTML = (trade.duration_days !== null && trade.duration_days !== undefined)
                 ? `${trade.duration_days}d`
-                : '<span class="muted">â€”</span>';
+                : '<span class="muted">ΓÇö</span>';
 
             const exitDateHTML = trade.exit_date
                 ? trade.exit_date
-                : '<span class="muted">in progressâ€¦</span>';
+                : '<span class="muted">in progressΓÇª</span>';
 
             const chartPrice = isClosed ? trade.exit_price : trade.entry_price;
             const chartType  = isClosed ? (trade.sell_type || 'SELL') : 'BUY';
@@ -183,11 +183,11 @@ async function fetchTrades() {
                     <td><strong>${trade.ticker}</strong></td>
                     <td><span class="${badgeClass}">${badgeLabel}</span></td>
                     <td>${formatCurrency(trade.entry_price)}</td>
-                    <td><span class="muted">â€”</span></td>
+                    <td><span class="muted">ΓÇö</span></td>
                     <td class="text-green">${trade.target_tp ? formatCurrency(trade.target_tp) : '-'}</td>
                     <td class="text-red">${trade.target_sl ? formatCurrency(trade.target_sl) : '-'}</td>
                     <td class="mono">${(trade.qty || 0).toFixed(4)}</td>
-                    <td class="mono"><span class="muted">â€”</span></td>
+                    <td class="mono"><span class="muted">ΓÇö</span></td>
                     <td>${pnlHTML}</td>
                     <td>${pnlPctHTML}</td>
                     <td>
@@ -224,7 +224,7 @@ async function openChartModal(ticker, date, actionPrice, type, entryPrice) {
     const loader = document.getElementById('modal-loader');
     const container = document.getElementById('chart-container');
     
-    title.textContent = `${ticker} â€” ${type}`;
+    title.textContent = `${ticker} ΓÇö ${type}`;
     container.innerHTML = ''; // Clear previous chart
     loader.style.display = 'block';
     modal.style.display = 'flex';
@@ -269,7 +269,7 @@ async function openChartModal(ticker, date, actionPrice, type, entryPrice) {
         
         candlestickSeries.setData(bars);
         
-        // â”€â”€ Entry / Action price line (BUY=blue, SELL variants=amber) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ΓöÇΓöÇ Entry / Action price line (BUY=blue, SELL variants=amber) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
         const isBuy = type.toLowerCase() === 'buy';
         const actionColor = isBuy ? '#3b82f6' : '#f59e0b';
         candlestickSeries.createPriceLine({
@@ -281,9 +281,9 @@ async function openChartModal(ticker, date, actionPrice, type, entryPrice) {
             title: isBuy ? `BUY  $${actionPrice.toFixed(2)}` : `${type}  $${actionPrice.toFixed(2)}`,
         });
 
-        // â”€â”€ TP / SL lines (only when entry_price was available) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ΓöÇΓöÇ TP / SL lines (only when entry_price was available) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
         if (levels) {
-            // Take-Profit line â€” green
+            // Take-Profit line ΓÇö green
             candlestickSeries.createPriceLine({
                 price: levels.tp,
                 color: '#10b981',
@@ -292,7 +292,7 @@ async function openChartModal(ticker, date, actionPrice, type, entryPrice) {
                 axisLabelVisible: true,
                 title: `TP +${levels.tp_pct.toFixed(0)}%  $${levels.tp.toFixed(2)}`,
             });
-            // Stop-Loss line â€” red
+            // Stop-Loss line ΓÇö red
             candlestickSeries.createPriceLine({
                 price: levels.sl,
                 color: '#ef4444',
@@ -320,7 +320,7 @@ function closeChartModal() {
     }
 }
 
-// â”€â”€â”€ Tab Navigation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ΓöÇΓöÇΓöÇ Tab Navigation ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 function switchTab(tab) {
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -331,7 +331,7 @@ function switchTab(tab) {
     closeSidebar();
 }
 
-// â”€â”€â”€ Mobile Sidebar Toggle â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ΓöÇΓöÇΓöÇ Mobile Sidebar Toggle ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 function toggleSidebar() {
     const sidebar = document.getElementById('sidebar');
@@ -353,7 +353,7 @@ function closeSidebar() {
     document.body.style.overflow = '';
 }
 
-// â”€â”€â”€ Crypto Universe Sidebar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ΓöÇΓöÇΓöÇ Crypto Universe Sidebar ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 async function fetchCryptoUniverse() {
     try {
@@ -378,7 +378,7 @@ async function fetchCryptoUniverse() {
     }
 }
 
-// â”€â”€â”€ Crypto KPIs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ΓöÇΓöÇΓöÇ Crypto KPIs ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 async function fetchCryptoMetrics() {
     try {
@@ -397,7 +397,7 @@ async function fetchCryptoMetrics() {
     }
 }
 
-// â”€â”€â”€ Crypto Price Grid â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ΓöÇΓöÇΓöÇ Crypto Price Grid ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 const CRYPTO_NAMES = {
     'BTC/USD': 'Bitcoin', 'ETH/USD': 'Ethereum', 'BNB/USD': 'BNB',
@@ -432,7 +432,7 @@ async function fetchCryptoPrices() {
             const fullName = CRYPTO_NAMES[sym] || shortName;
 
             const changeClass = change24h >= 0 ? 'change-up' : 'change-down';
-            const changeIcon = change24h >= 0 ? 'â–²' : 'â–¼';
+            const changeIcon = change24h >= 0 ? 'Γû▓' : 'Γû╝';
             const signalBadge = signal
                 ? '<span class="signal-buy">BUY</span>'
                 : '';
@@ -477,7 +477,7 @@ async function fetchCryptoPrices() {
     }
 }
 
-// â”€â”€â”€ Crypto Trade History â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ΓöÇΓöÇΓöÇ Crypto Trade History ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 async function fetchCryptoTrades() {
     try {
@@ -503,18 +503,18 @@ async function fetchCryptoTrades() {
             const pnlClass = pnl === null ? '' : (pnl >= 0 ? 'positive' : 'negative');
             let typeBadge;
             if (!isClosed) {
-                typeBadge = '<span class="trade-type buy">â— OPEN</span>';
+                typeBadge = '<span class="trade-type buy">ΓùÅ OPEN</span>';
             } else {
                 // Correctly map crypto sell types to badges
                 const st = (t.sell_type || '').toUpperCase();
                 if (st.includes('TP')) {
-                    typeBadge = '<span class="trade-type sell-tp">âœ” SELL_TP</span>';
+                    typeBadge = '<span class="trade-type sell-tp">Γ£ö SELL_TP</span>';
                 } else if (st.includes('SL')) {
-                    typeBadge = '<span class="trade-type sell-sl">âœ˜ SELL_SL</span>';
+                    typeBadge = '<span class="trade-type sell-sl">Γ£ÿ SELL_SL</span>';
                 } else if (st.includes('TIME') || st.includes('72H') || st.includes('EOW')) {
-                    typeBadge = `<span class="trade-type sell">â° ${t.sell_type}</span>`;
+                    typeBadge = `<span class="trade-type sell">ΓÅ░ ${t.sell_type}</span>`;
                 } else if (st.includes('MANUAL')) {
-                    typeBadge = '<span class="trade-type sell-manual">ðŸ”’ MANUAL</span>';
+                    typeBadge = '<span class="trade-type sell-manual">≡ƒöÆ MANUAL</span>';
                 } else {
                     typeBadge = `<span class="trade-type sell">${t.sell_type || 'CLOSED'}</span>`;
                 }
@@ -551,7 +551,7 @@ async function fetchCryptoTrades() {
                     <td>${typeBadge}</td>
                     <td>${formatCurrency(t.notional)}</td>
                     <td>${t.entry_price ? '$' + parseFloat(t.entry_price).toFixed(4) : '-'}</td>
-                    <td><span class="muted">â€”</span></td>
+                    <td><span class="muted">ΓÇö</span></td>
                     <td class="text-green">${t.target_tp ? '$' + parseFloat(t.target_tp).toFixed(4) : '-'}</td>
                     <td class="text-red">${t.target_sl ? '$' + parseFloat(t.target_sl).toFixed(4) : '-'}</td>
                     <td>${t.atr_at_entry ? parseFloat(t.atr_at_entry).toFixed(4) : '-'}</td>
@@ -582,7 +582,7 @@ async function fetchCryptoTrades() {
     }
 }
 
-// â”€â”€â”€ Crypto Chart Modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ΓöÇΓöÇΓöÇ Crypto Chart Modal ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 /**
  * Opens the shared chart modal for a crypto pair.
@@ -595,7 +595,7 @@ async function openCryptoChartModal(symbol, entryPrice) {
     const loader    = document.getElementById('modal-loader');
     const container = document.getElementById('chart-container');
 
-    title.textContent = `${symbol}/USD â€” Price Chart`;
+    title.textContent = `${symbol}/USD ΓÇö Price Chart`;
     container.innerHTML = '';
     loader.style.display = 'block';
     modal.style.display = 'flex';
@@ -678,7 +678,7 @@ async function openCryptoChartModal(symbol, entryPrice) {
     }
 }
 
-// â”€â”€â”€ Manual Close Trade Modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ΓöÇΓöÇΓöÇ Manual Close Trade Modal ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 // State of the pending close operation
 let pendingClose = null;
@@ -721,7 +721,7 @@ async function confirmCloseTrade() {
 
     const btn = document.getElementById('close-trade-confirm-btn');
     btn.disabled = true;
-    btn.textContent = 'â³ Ejecutando...';
+    btn.textContent = 'ΓÅ│ Ejecutando...';
 
     const { type, ticker, buyId, qty, entryPrice } = pendingClose;
     const endpoint = type === 'crypto' ? '/api/crypto/close-trade' : '/api/close-trade';
@@ -745,7 +745,7 @@ async function confirmCloseTrade() {
             const pnlSign = pnl >= 0 ? '+' : '';
             resultEl.className = 'close-trade-result success';
             resultEl.innerHTML =
-                `âœ… Cerrado a <strong>${formatCurrency(data.exit_price)}</strong> &nbsp;|&nbsp; ` +
+                `Γ£à Cerrado a <strong>${formatCurrency(data.exit_price)}</strong> &nbsp;|&nbsp; ` +
                 `P&L: <strong>${pnlSign}${formatCurrency(pnl)}</strong> ` +
                 `(${pnlSign}${(pnlPct * 100).toFixed(2)}%)`;
 
@@ -760,25 +760,27 @@ async function confirmCloseTrade() {
             }, 1800);
         } else {
             resultEl.className = 'close-trade-result error';
-            resultEl.textContent = `âŒ Error: ${data.detail || data.error || 'Error desconocido'}`;
+            resultEl.textContent = `Γ¥î Error: ${data.detail || data.error || 'Error desconocido'}`;
             btn.disabled = false;
             btn.innerHTML = '&#x26A1; Reintentar';
         }
     } catch (err) {
         resultEl.className = 'close-trade-result error';
-        resultEl.textContent = `âŒ Error de conexiÃ³n: ${err.message}`;
+        resultEl.textContent = `\u274C Error de conexi\u00F3n: ${err.message}`;
         btn.disabled = false;
         btn.innerHTML = '&#x26A1; Reintentar';
     }
 }
 
+// ─── Sync Alpaca → DB ──────────────────────────────────────────────────────
+
 async function syncFromAlpaca() {
     const btn = document.getElementById('sync-btn');
     const icon = document.getElementById('sync-icon');
-    const status = document.getElementById('sync-status');
+    const statusEl = document.getElementById('sync-status');
     btn.disabled = true;
-    icon.textContent = '⏳';
-    status.textContent = 'Sincronizando...';
+    icon.textContent = '\u23F3';
+    statusEl.textContent = 'Sincronizando...';
     try {
         const resp = await fetch('/api/sync', { method: 'POST' });
         const data = await resp.json();
@@ -786,20 +788,22 @@ async function syncFromAlpaca() {
             const eq = data.equities_inserted || 0;
             const cr = data.crypto_inserted || 0;
             const op = data.open_positions_inserted || 0;
-            status.textContent = ✅ Eq: Cripto: Pos:;
-            icon.textContent = '✅';
-            // Refrescar tablas
+            statusEl.textContent = '\u2705 Eq:' + eq + ' Cripto:' + cr + ' Pos:' + op;
+            icon.textContent = '\u2705';
             fetchTrades();
             fetchCryptoTrades();
         } else {
-            status.textContent = '❌ ' + (data.detail || 'Error');
-            icon.textContent = '🔄';
+            statusEl.textContent = '\u274C ' + (data.detail || 'Error');
+            icon.textContent = '\uD83D\uDD04';
         }
     } catch (err) {
-        status.textContent = '❌ ' + err.message;
-        icon.textContent = '🔄';
+        statusEl.textContent = '\u274C ' + err.message;
+        icon.textContent = '\uD83D\uDD04';
     } finally {
         btn.disabled = false;
-        setTimeout(() => { status.textContent = ''; icon.textContent = '🔄'; }, 8000);
+        setTimeout(function() {
+            statusEl.textContent = '';
+            icon.textContent = '\uD83D\uDD04';
+        }, 8000);
     }
 }
