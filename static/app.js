@@ -85,6 +85,12 @@ async function fetchMetrics() {
         pnlEl.textContent = formatCurrency(data.total_pnl);
         if (data.total_pnl > 0) pnlEl.classList.add('positive');
         if (data.total_pnl < 0) pnlEl.classList.add('negative');
+        
+        const feesEl = document.getElementById('kpi-fees');
+        if (feesEl) {
+            feesEl.textContent = formatCurrency(data.total_fees || 0);
+            if (data.total_fees > 0) feesEl.classList.add('negative');
+        }
 
         const winRateEl = document.getElementById('kpi-winrate');
         winRateEl.textContent = data.win_rate.toFixed(1) + '%';
@@ -174,6 +180,7 @@ async function fetchTrades() {
                     <td class="mono">${durHTML}</td>
                     <td>${pnlHTML}</td>
                     <td>${pnlPctHTML}</td>
+                    <td class="text-red">${trade.estimated_fee !== undefined ? formatCurrency(trade.estimated_fee) : '-'}</td>
                 `;
                 closedTbody.appendChild(tr);
                 closedCount++;
@@ -190,6 +197,7 @@ async function fetchTrades() {
                     <td class="mono"><span class="muted">—</span></td>
                     <td>${pnlHTML}</td>
                     <td>${pnlPctHTML}</td>
+                    <td class="text-red">${trade.estimated_fee !== undefined ? formatCurrency(trade.estimated_fee) : '-'}</td>
                     <td>
                         <button class="btn-close-trade" onclick="event.stopPropagation(); openCloseModal('equity', '${trade.ticker}', ${trade.buy_id ?? 'null'}, ${trade.qty || 0}, ${trade.entry_price || 0})">
                             &#x26A1; Cerrar

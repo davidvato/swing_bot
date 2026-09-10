@@ -324,6 +324,9 @@ def get_trades():
                         p = pos_map[t["ticker"]]
                         t["pnl"] = float(p.unrealized_pl) if p.unrealized_pl else 0.0
                         t["pnl_pct"] = float(p.unrealized_plpc) if p.unrealized_plpc else 0.0
+                        current_price = float(p.current_price) if p.current_price else t["entry_price"]
+                        qty = t["qty"] or 0
+                        t["estimated_fee"] = (qty * current_price) * 0.0000278 + qty * 0.000166
         except Exception as e:
             print(f"Error fetching live P&L for equities: {e}")
 
@@ -336,6 +339,17 @@ def get_trades():
             else:
                 t["target_tp"] = None
                 t["target_sl"] = None
+                
+            # Calculate fee for CLOSED trades
+            if t["status"] == "CLOSED":
+                exit_price = t.get("exit_price") or 0
+                qty = t.get("qty") or 0
+                t["estimated_fee"] = (qty * exit_price) * 0.0000278 + qty * 0.000166
+            elif t["status"] == "OPEN" and "estimated_fee" not in t:
+                # Fallback if Alpaca live data failed
+                ep_fallback = t.get("entry_price") or 0
+                qty = t.get("qty") or 0
+                t["estimated_fee"] = (qty * ep_fallback) * 0.0000278 + qty * 0.000166
 
         # Sort: OPEN first (newest entry first), then CLOSED by exit_date DESC
         open_trades = sorted(
@@ -371,6 +385,14 @@ def get_metrics():
         row = cur.fetchone()
         total_pnl = row["total_pnl"] if row["total_pnl"] else 0
         
+        cur.execute("SELECT qty, exit_price FROM trades WHERE pnl IS NOT NULL AND trade_type LIKE 'SELL%'")
+        closed_trades_rows = cur.fetchall()
+        total_fees = 0.0
+        for r in closed_trades_rows:
+            q = r["qty"] or 0
+            ep = r["exit_price"] or 0
+            total_fees += (q * ep) * 0.0000278 + q * 0.000166
+        
         conn.close()
         
         total_completed = winning_trades + losing_trades
@@ -378,6 +400,7 @@ def get_metrics():
         
         return {
             "total_pnl": total_pnl,
+            "total_fees": total_fees,
             "win_rate": win_rate,
             "winning_trades": winning_trades,
             "losing_trades": losing_trades,
