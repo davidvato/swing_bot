@@ -56,6 +56,9 @@
                     <button class="tab-btn" id="tab-crypto" onclick="switchTab('crypto')" style="display: none;">
                         &#x20BF; Crypto
                     </button>
+                    <button class="tab-btn" id="tab-info" onclick="switchTab('info')">
+                        &#x2139;&#xFE0F; Info Bot
+                    </button>
                 </div>
             </header>
 
@@ -236,6 +239,47 @@
                                 <tr><td colspan="10" class="text-center">Loading crypto trade history...</td></tr>
                             </tbody>
                         </table>
+                    </div>
+                </section>
+            </div>
+
+            <!-- ══════════════ INFO BOT TAB ══════════════ -->
+            <div id="pane-info" class="tab-pane" style="display: none;">
+                <section class="trades-section glass-panel" style="max-width: 800px; margin: 0 auto; line-height: 1.6;">
+                    <h2 style="border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 0.5rem; margin-bottom: 1.5rem;">🤖 Acerca de Swing Bot</h2>
+                    
+                    <div style="margin-bottom: 2rem;">
+                        <h3 style="color: #6366f1;">Estrategia General</h3>
+                        <p>Swing Bot es un sistema algorítmico 100% autónomo diseñado para operar acciones (Equities) y Criptomonedas de manera inteligente, gestionando el riesgo de forma matemática.</p>
+                        <p>El bot utiliza indicadores técnicos avanzados (RSI, Medias Móviles, MACD y ATR) para detectar oportunidades en el mercado y proteger el capital ante caídas bruscas.</p>
+                    </div>
+
+                    <div style="margin-bottom: 2rem;">
+                        <h3 style="color: #6366f1;">Mercado de Acciones (Equities)</h3>
+                        <ul style="list-style: disc; margin-left: 1.5rem; color: #cbd5e1;">
+                            <li><strong>Horario:</strong> Lunes a Viernes. Compra a las 9:30 AM EST (apertura de mercado).</li>
+                            <li><strong>Cierre semanal:</strong> Todas las posiciones abiertas se liquidan automáticamente los Viernes a las 3:45 PM EST (Stop-Loss de tiempo) para evitar riesgos de fin de semana (Gaps).</li>
+                            <li><strong>Universo:</strong> Opera exclusivamente acciones seleccionadas (ej. NVDA, AMD, MSFT, AAPL, etc).</li>
+                        </ul>
+                    </div>
+
+                    <div style="margin-bottom: 2rem;">
+                        <h3 style="color: #6366f1;">Mercado de Criptomonedas</h3>
+                        <ul style="list-style: disc; margin-left: 1.5rem; color: #cbd5e1;">
+                            <li><strong>Horario:</strong> 24 horas al día, 7 días a la semana.</li>
+                            <li><strong>Stop-Loss Dinámico (ATR):</strong> Utiliza el indicador ATR (Average True Range) para medir la volatilidad de la criptomoneda y colocar un Stop-Loss adecuado.</li>
+                            <li><strong>Take-Profit:</strong> Ratio Riesgo-Beneficio de 2:1. Busca ganar el doble de lo que arriesga en base a la volatilidad (ATR).</li>
+                        </ul>
+                    </div>
+
+                    <div style="margin-bottom: 2rem;">
+                        <h3 style="color: #6366f1;">Gestión de Riesgo (Half-Kelly)</h3>
+                        <p>Para decidir cuánto dinero invertir en cada operación, el bot utiliza una variante conservadora del Criterio de Kelly (Half-Kelly). Este modelo matemático calcula el tamaño de posición óptimo (Position Sizing) basándose en:</p>
+                        <ul style="list-style: disc; margin-left: 1.5rem; color: #cbd5e1; margin-top: 0.5rem;">
+                            <li>El Win Rate (Probabilidad de acierto).</li>
+                            <li>El Ratio de Ganancia/Pérdida promedio.</li>
+                        </ul>
+                        <p style="margin-top: 0.5rem;">Esto significa que el bot invertirá más fuerte en escenarios de alta probabilidad y reducirá su exposición (o dejará de comprar) cuando entra en una racha de pérdidas, protegiendo tu <strong>Equity</strong> (Capital) y evitando que tu <strong>Buying Power</strong> se evapore de golpe.</p>
                     </div>
                 </section>
             </div>
