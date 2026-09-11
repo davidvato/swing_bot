@@ -299,7 +299,25 @@ def get_trades():
                         "buy_id": buy["id"],
                         "sell_id": row["id"],
                     })
-                # Orphan SELL with no matching BUY — silently skip
+                else:
+                    # Orphan SELL with no matching BUY - show it anyway to match metrics
+                    paired.append({
+                        "status": "CLOSED",
+                        "ticker": ticker,
+                        "sell_type": row["trade_type"] + " (Orphan)",
+                        "entry_date": "Unknown",
+                        "exit_date": row["date"],
+                        "entry_price": None,
+                        "exit_price": row["exit_price"],
+                        "qty": row["qty"],
+                        "notional": None,
+                        "pnl": row["pnl"],
+                        "pnl_pct": row["pnl_pct"],
+                        "kelly_pct": None,
+                        "duration_days": None,
+                        "buy_id": None,
+                        "sell_id": row["id"],
+                    })
 
         # Remaining unmatched BUYs → OPEN positions
         for ticker, buy_queue in pending_buys.items():
@@ -588,6 +606,23 @@ def get_crypto_trades():
                         "pnl_pct": row["pnl_pct"],
                         "atr_at_entry": buy.get("atr_at_entry"),
                         "duration_days": duration_days,
+                    })
+                else:
+                    # Orphan SELL with no matching BUY - show it anyway to match metrics
+                    paired.append({
+                        "status": "CLOSED",
+                        "ticker": ticker,
+                        "sell_type": row["trade_type"] + " (Orphan)",
+                        "entry_date": "Unknown",
+                        "exit_date": row["date"],
+                        "entry_price": None,
+                        "exit_price": row["exit_price"],
+                        "qty": row["qty"],
+                        "notional": None,
+                        "pnl": row["pnl"],
+                        "pnl_pct": row["pnl_pct"],
+                        "atr_at_entry": None,
+                        "duration_days": None,
                     })
 
         closed_trades = sorted(
