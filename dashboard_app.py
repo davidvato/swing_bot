@@ -405,7 +405,7 @@ def get_metrics():
         gross_profit = row_gross["gross_profit"] if row_gross["gross_profit"] else 0
         gross_loss = row_gross["gross_loss"] if row_gross["gross_loss"] else 0
         
-        cur.execute("SELECT SUM(pnl) as gross_profit_week FROM trades WHERE pnl > 0 AND strftime('%Y-%W', exit_date) = strftime('%Y-%W', 'now')")
+        cur.execute("SELECT SUM(pnl) as gross_profit_week FROM trades WHERE pnl > 0 AND strftime('%Y-%W', date) = strftime('%Y-%W', 'now')")
         row_gross_week = cur.fetchone()
         gross_profit_week = row_gross_week["gross_profit_week"] if row_gross_week and row_gross_week["gross_profit_week"] else 0
         
