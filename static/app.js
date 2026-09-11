@@ -100,6 +100,16 @@ async function fetchMetrics() {
                 pnlMeta.innerHTML = `<span class="positive" style="font-weight:600">↑ ${growthPct.toFixed(2)}%</span> | <span class="negative" style="font-weight:600">↓ ${lossPct.toFixed(2)}%</span>`;
             }
         }
+        
+        // Render Gross Profits (Ganancias Brutas)
+        const grossEl = document.getElementById('kpi-gross-profit');
+        if (grossEl) {
+            grossEl.textContent = formatCurrency(data.gross_profit || 0);
+        }
+        const grossWeekMeta = document.getElementById('gross-week-meta');
+        if (grossWeekMeta) {
+            grossWeekMeta.textContent = `Esta semana: ${formatCurrency(data.gross_profit_week || 0)}`;
+        }
 
         const feesEl = document.getElementById('kpi-fees');
         if (feesEl) {
