@@ -78,14 +78,29 @@ async function fetchBudget() {
 
 async function fetchMetrics() {
     try {
-        const res = await fetch('/api/metrics');
-        const data = await res.json();
+        const [resMetrics, resBudget] = await Promise.all([
+            fetch('/api/metrics'),
+            fetch('/api/budget')
+        ]);
+        const data = await resMetrics.json();
+        const budgetData = await resBudget.json();
 
         const pnlEl = document.getElementById('kpi-pnl');
         pnlEl.textContent = formatCurrency(data.total_pnl);
         if (data.total_pnl > 0) pnlEl.classList.add('positive');
         if (data.total_pnl < 0) pnlEl.classList.add('negative');
         
+        // Render Gross Growth / Loss
+        if (budgetData && budgetData.initial_budget && budgetData.initial_budget > 0) {
+            const initial = budgetData.initial_budget;
+            const growthPct = (data.gross_profit / initial) * 100;
+            const lossPct = (data.gross_loss / initial) * 100;
+            const pnlMeta = document.getElementById('pnl-pct-meta');
+            if (pnlMeta) {
+                pnlMeta.innerHTML = `<span class="positive" style="font-weight:600">↑ ${growthPct.toFixed(2)}%</span> | <span class="negative" style="font-weight:600">↓ ${lossPct.toFixed(2)}%</span>`;
+            }
+        }
+
         const feesEl = document.getElementById('kpi-fees');
         if (feesEl) {
             feesEl.textContent = formatCurrency(data.total_fees || 0);

@@ -199,10 +199,25 @@ def get_budget():
         try:
             client = TradingClient(API_KEY, SECRET_KEY, paper=PAPER)
             account = client.get_account()
+            
+            # Estimate initial budget
+            initial_budget = float(account.equity)
+            try:
+                conn = get_db_connection()
+                cur = conn.cursor()
+                cur.execute("SELECT SUM(pnl) as total_pnl FROM trades WHERE pnl IS NOT NULL")
+                row = cur.fetchone()
+                total_pnl = row["total_pnl"] if row["total_pnl"] else 0
+                conn.close()
+                initial_budget = float(account.equity) - total_pnl
+            except Exception:
+                pass
+                
             return {
                 "equity": float(account.equity),
                 "buying_power": float(account.buying_power),
-                "source": "Alpaca API"
+                "source": "Alpaca API",
+                "initial_budget": initial_budget
             }
         except Exception as e:
             print(f"Error fetching Alpaca account: {e}")
@@ -385,6 +400,11 @@ def get_metrics():
         row = cur.fetchone()
         total_pnl = row["total_pnl"] if row["total_pnl"] else 0
         
+        cur.execute("SELECT SUM(CASE WHEN pnl > 0 THEN pnl ELSE 0 END) as gross_profit, SUM(CASE WHEN pnl < 0 THEN ABS(pnl) ELSE 0 END) as gross_loss FROM trades WHERE pnl IS NOT NULL")
+        row_gross = cur.fetchone()
+        gross_profit = row_gross["gross_profit"] if row_gross["gross_profit"] else 0
+        gross_loss = row_gross["gross_loss"] if row_gross["gross_loss"] else 0
+        
         cur.execute("SELECT qty, exit_price FROM trades WHERE pnl IS NOT NULL AND trade_type LIKE 'SELL%'")
         closed_trades_rows = cur.fetchall()
         total_fees = 0.0
@@ -400,6 +420,8 @@ def get_metrics():
         
         return {
             "total_pnl": total_pnl,
+            "gross_profit": gross_profit,
+            "gross_loss": gross_loss,
             "total_fees": total_fees,
             "win_rate": win_rate,
             "winning_trades": winning_trades,
