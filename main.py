@@ -653,7 +653,21 @@ async def run_main_loop(
             crypto_supervisor.start()
 
     signals_run_today = False
+    
+    # Cargar last_signal_date desde disco para sobrevivir reinicios
+    STATE_FILE = "bot_state.json"
     last_signal_date = None
+    try:
+        import json
+        from pathlib import Path
+        if Path(STATE_FILE).exists():
+            with open(STATE_FILE, "r") as f:
+                state = json.load(f)
+                if "last_signal_date" in state:
+                    last_signal_date = datetime.strptime(state["last_signal_date"], "%Y-%m-%d").date()
+    except Exception as e:
+        logger.error(f"Error cargando estado: {e}")
+        
     last_crypto_hour = None   # Para ejecutar el ciclo cripto 1x por hora
 
     while True:
@@ -676,6 +690,14 @@ async def run_main_loop(
                         data_client, order_manager, supervisor, trade_logger, screener
                     )
                     last_signal_date = today
+                    
+                    # Guardar estado en disco
+                    try:
+                        import json
+                        with open(STATE_FILE, "w") as f:
+                            json.dump({"last_signal_date": str(today)}, f)
+                    except Exception as e:
+                        logger.error(f"Error guardando estado: {e}")
 
             # ─── Ciclo de cripto: cada hora, 24/7 ────────────────────────────
             if (
