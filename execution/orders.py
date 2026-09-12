@@ -22,7 +22,7 @@ from alpaca.trading.requests import MarketOrderRequest, GetAssetsRequest
 from alpaca.trading.enums import OrderSide, TimeInForce, AssetClass
 from alpaca.trading.models import Order, Position, TradeAccount
 
-from config import REQUEST_INTERVAL_SEC, MAX_RETRY_ATTEMPTS
+from config import REQUEST_INTERVAL_SEC, MAX_RETRY_ATTEMPTS, USE_TEST_BUDGET, TEST_BUDGET_USD
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +97,10 @@ class OrderManager:
         Returns:
             Equity de la cuenta en USD como float.
         """
+        if USE_TEST_BUDGET:
+            logger.info(f"MODO PRUEBA ACTIVADO: Usando equity simulado de ${TEST_BUDGET_USD}")
+            return TEST_BUDGET_USD
+
         account = self.get_account()
         equity = float(account.equity)
         logger.info(f"Equity de cuenta: ${equity:,.2f}")

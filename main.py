@@ -169,7 +169,7 @@ def run_connection_test(api_key: str, secret_key: str) -> None:
 
     try:
         account = order_manager.get_account()
-        equity = float(account.equity)
+        equity = order_manager.get_account_equity()
         cash = float(account.cash)
         buying_power = float(account.buying_power)
 

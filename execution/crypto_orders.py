@@ -31,7 +31,7 @@ from alpaca.trading.requests import (
 )
 from alpaca.trading.enums import OrderSide, TimeInForce
 
-from config import CRYPTO_MAX_POSITION_PCT
+from config import CRYPTO_MAX_POSITION_PCT, USE_TEST_BUDGET, TEST_BUDGET_USD
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +58,10 @@ class CryptoOrderManager:
     def get_account_equity(self) -> float:
         """Retorna el equity total de la cuenta Alpaca (compartido con equities)."""
         try:
+            if USE_TEST_BUDGET:
+                logger.info(f"MODO PRUEBA ACTIVADO: Usando equity simulado (CRIPTO) de ${TEST_BUDGET_USD}")
+                return TEST_BUDGET_USD
+            
             account = self._client.get_account()
             return float(account.equity)
         except Exception as exc:
