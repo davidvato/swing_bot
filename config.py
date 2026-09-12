@@ -55,8 +55,8 @@ KELLY_FRACTION: float = 0.5     # Fraccion de Kelly aplicada (0.5 = Half-Kelly)
 MAX_POSITION_PCT: float = 0.15  # Techo duro maximo por operacion (15% del equity)
 
 # ─── Parametros de Salida (TP/SL emulados) ───────────────────────────────────
-TAKE_PROFIT_PCT: float = 0.05   # Take-Profit: salida con +5% de ganancia
-STOP_LOSS_PCT: float = 0.05     # Stop-Loss: salida con -5% de perdida
+TAKE_PROFIT_PCT: float = 0.04   # Take-Profit: salida con +4% de ganancia
+STOP_LOSS_PCT: float = 0.04     # Stop-Loss: salida con -4% de perdida
 MAX_HOLD_DAYS: int = 5          # Dias maximos de holding antes de salida forzada
 SL_GRACE_PERIOD_MINS: int = 15  # Periodo de gracia (minutos) en la apertura para SL
 
