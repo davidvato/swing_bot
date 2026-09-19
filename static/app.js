@@ -302,6 +302,19 @@ async function openChartModal(ticker, date, actionPrice, type, entryPrice) {
         
         candlestickSeries.setData(bars);
         
+        if (date) {
+            const entryDateStr = date.split(' ')[0];
+            candlestickSeries.setMarkers([
+                {
+                    time: entryDateStr,
+                    position: 'belowBar',
+                    color: '#3b82f6',
+                    shape: 'arrowUp',
+                    text: 'Entry'
+                }
+            ]);
+        }
+        
         // ── Entry / Action price line (BUY=blue, SELL variants=amber) ──────────
         const isBuy = type.toLowerCase() === 'buy';
         const actionColor = isBuy ? '#3b82f6' : '#f59e0b';
@@ -573,8 +586,8 @@ async function fetchCryptoTrades() {
                     <td class="${pnlClass}">${t.pnl_pct !== null ? (t.pnl_pct * 100).toFixed(2) + '%' : '-'}</td>
                 `;
                 const sym = (t.ticker || '').replace('/USD', '');
-                const chartPrice = t.exit_price ? parseFloat(t.exit_price) : null;
-                tr.addEventListener('click', () => openCryptoChartModal(sym, t.entry_price ? parseFloat(t.entry_price) : null));
+                const chartPrice = t.entry_price ? parseFloat(t.entry_price) : null;
+                tr.addEventListener('click', () => openCryptoChartModal(sym, t.entry_date, chartPrice));
                 closedTbody.appendChild(tr);
                 closedCount++;
             } else {
@@ -598,7 +611,7 @@ async function fetchCryptoTrades() {
                 `;
                 const sym = (t.ticker || '').replace('/USD', '');
                 const chartPrice = t.entry_price ? parseFloat(t.entry_price) : null;
-                tr.addEventListener('click', () => openCryptoChartModal(sym, chartPrice));
+                tr.addEventListener('click', () => openCryptoChartModal(sym, t.entry_date, chartPrice));
                 openTbody.appendChild(tr);
                 openCount++;
             }
@@ -620,9 +633,10 @@ async function fetchCryptoTrades() {
 /**
  * Opens the shared chart modal for a crypto pair.
  * @param {string} symbol  - Short symbol, e.g. 'BTC'
+ * @param {string} date - Entry date string
  * @param {number|null} entryPrice - Optional entry price for TP/SL levels
  */
-async function openCryptoChartModal(symbol, entryPrice) {
+async function openCryptoChartModal(symbol, date, entryPrice) {
     const modal     = document.getElementById('chart-modal');
     const title     = document.getElementById('modal-title');
     const loader    = document.getElementById('modal-loader');
@@ -669,6 +683,19 @@ async function openCryptoChartModal(symbol, entryPrice) {
             wickDownColor: '#ef4444'
         });
         candlestickSeries.setData(bars);
+
+        if (date) {
+            const entryDateStr = date.split(' ')[0];
+            candlestickSeries.setMarkers([
+                {
+                    time: entryDateStr,
+                    position: 'belowBar',
+                    color: '#f59e0b',
+                    shape: 'arrowUp',
+                    text: 'Entry'
+                }
+            ]);
+        }
 
         // Entry price line (amber for crypto)
         if (entryPrice && entryPrice > 0) {
