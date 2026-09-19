@@ -110,10 +110,12 @@ CRYPTO_UNIVERSE_SIZE: int = 10
 CRYPTO_UNIVERSE_CACHE: str = "crypto_universe_cache.json"
 CRYPTO_UNIVERSE_UPDATE_UTC: str = "00:01"  # Cada domingo/lunes medianoche UTC
 
-# Parametros de indicadores (calibrados para volatilidad cripto)
-CRYPTO_SMA_PERIOD: int = 50          # SMA-50 (estandar en cripto vs SMA-200 en equities)
-CRYPTO_RSI_PERIOD: int = 4           # RSI-4 (robusto en ambos mercados)
-CRYPTO_RSI_OVERSOLD: float = 30.0    # Umbral RSI sobreventa
+# Parametros de indicadores (calibrados para Trend-Following / Momentum en Cripto)
+CRYPTO_SMA_MACRO: int = 200          # Filtro de tendencia macro (solo operar en bull market)
+CRYPTO_EMA_FAST: int = 9             # EMA rapida para crossover
+CRYPTO_EMA_SLOW: int = 21            # EMA lenta para crossover
+CRYPTO_RSI_PERIOD: int = 14          # RSI estandar para medir fuerza del momentum
+CRYPTO_RSI_MOMENTUM_MIN: float = 50.0 # RSI minimo para confirmar fuerza alcista
 
 # ─── TP/SL Dinamico basado en ATR (Average True Range) ───────────────────────
 # Formula:

@@ -23,9 +23,11 @@ from config import (
     RSI_PERIOD,
     RSI_OVERSOLD,
     CONSEC_DOWN_DAYS,
-    CRYPTO_SMA_PERIOD,
+    CRYPTO_SMA_MACRO,
+    CRYPTO_EMA_FAST,
+    CRYPTO_EMA_SLOW,
     CRYPTO_RSI_PERIOD,
-    CRYPTO_RSI_OVERSOLD,
+    CRYPTO_RSI_MOMENTUM_MIN,
 )
 
 logger = logging.getLogger(__name__)
@@ -42,6 +44,14 @@ def _compute_sma(series: pd.Series, period: int) -> pd.Series:
     Equivalente a pandas_ta.sma(length=period) sin numba.
     """
     return series.rolling(window=period, min_periods=period).mean()
+
+
+def _compute_ema(series: pd.Series, period: int) -> pd.Series:
+    """
+    Media Movil Exponencial (EMA).
+    Equivalente a pandas_ta.ema(length=period) sin numba.
+    """
+    return series.ewm(span=period, min_periods=period).mean()
 
 
 def _compute_rsi(series: pd.Series, period: int) -> pd.Series:
@@ -231,26 +241,25 @@ def get_signal_summary(ticker: str, df: pd.DataFrame) -> dict:
 
 # ─── Funciones de Cripto (parametros aislados CRYPTO_*) ───────────────────────
 
-COL_CRYPTO_SMA = f"SMA_{CRYPTO_SMA_PERIOD}"
+COL_CRYPTO_SMA_MACRO = f"SMA_{CRYPTO_SMA_MACRO}"
+COL_CRYPTO_EMA_FAST = f"EMA_{CRYPTO_EMA_FAST}"
+COL_CRYPTO_EMA_SLOW = f"EMA_{CRYPTO_EMA_SLOW}"
 COL_CRYPTO_RSI = f"RSI_{CRYPTO_RSI_PERIOD}"
-COL_CRYPTO_CONSEC_DOWN = "CRYPTO_CONSEC_DOWN"
 
 
 def compute_crypto_indicators(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Calcula indicadores tecnicos para activos cripto.
-
-    Usa parametros CRYPTO_* (SMA-50, RSI-4) calibrados para la
-    mayor volatilidad del mercado de criptomonedas.
+    Calcula indicadores tecnicos para activos cripto usando la estrategia Momentum Crossover.
 
     Args:
-        df: DataFrame con columna 'close' y al menos 50 sesiones horarias.
+        df: DataFrame con columna 'close' y suficientes sesiones historicas (>=200).
 
     Returns:
         DataFrame con columnas adicionales:
-            - SMA_50: Media Movil Simple de 50 periodos.
-            - RSI_4: Indice de Fuerza Relativa de 4 periodos.
-            - CRYPTO_CONSEC_DOWN: Ultimos 4 cierres consecutivamente bajistas.
+            - SMA_200 (Macro filter)
+            - EMA_9 (Fast)
+            - EMA_21 (Slow)
+            - RSI_14 (Momentum strength)
     """
     if "close" not in df.columns:
         raise ValueError(
@@ -259,24 +268,28 @@ def compute_crypto_indicators(df: pd.DataFrame) -> pd.DataFrame:
         )
 
     df = df.copy()
-    df[COL_CRYPTO_SMA] = _compute_sma(df["close"], CRYPTO_SMA_PERIOD)
+    
+    # Filtro de tendencia macro
+    df[COL_CRYPTO_SMA_MACRO] = _compute_sma(df["close"], CRYPTO_SMA_MACRO)
+    
+    # EMAs para Crossover
+    df[COL_CRYPTO_EMA_FAST] = _compute_ema(df["close"], CRYPTO_EMA_FAST)
+    df[COL_CRYPTO_EMA_SLOW] = _compute_ema(df["close"], CRYPTO_EMA_SLOW)
+    
+    # RSI para fuerza del momentum
     df[COL_CRYPTO_RSI] = _compute_rsi(df["close"], CRYPTO_RSI_PERIOD)
-
-    consec_vals = []
-    for idx in range(len(df)):
-        sub = df.iloc[: idx + 1]
-        consec_vals.append(check_consecutive_down(sub, CONSEC_DOWN_DAYS))
-    df[COL_CRYPTO_CONSEC_DOWN] = consec_vals
 
     return df
 
 
 def generate_crypto_signal(df: pd.DataFrame) -> bool:
     """
-    Evalua la condicion de señal de compra LONG para cripto.
+    Evalua la condicion de señal de compra LONG para cripto (Momentum Crossover).
 
-    Logica (misma estructura que equities, umbrales cripto):
-        SEÑAL = (close > SMA_50) AND (RSI_4 < 30 OR CONSEC_DOWN==True)
+    Logica:
+        1. Filtro Macro: close > SMA_200 (mercado alcista)
+        2. Gatillo: EMA rápida (9) cruzó por encima de EMA lenta (21)
+        3. Filtro de Momentum: RSI_14 > 50
 
     Args:
         df: DataFrame con indicadores cripto calculados.
@@ -284,50 +297,73 @@ def generate_crypto_signal(df: pd.DataFrame) -> bool:
     Returns:
         True si hay señal de entrada LONG valida.
     """
-    if df.empty:
+    if len(df) < 2:  # Necesitamos al menos 2 barras para evaluar un cruce
         return False
 
-    required = [COL_CRYPTO_SMA, COL_CRYPTO_RSI, COL_CRYPTO_CONSEC_DOWN]
+    required = [COL_CRYPTO_SMA_MACRO, COL_CRYPTO_EMA_FAST, COL_CRYPTO_EMA_SLOW, COL_CRYPTO_RSI]
     for col in required:
         if col not in df.columns:
             logger.warning(f"[CRYPTO] Columna '{col}' no encontrada. Sin señal.")
             return False
 
     last = df.iloc[-1]
+    prev = df.iloc[-2]
+
     close = last["close"]
-    sma = last[COL_CRYPTO_SMA]
+    sma_macro = last[COL_CRYPTO_SMA_MACRO]
+    ema_fast_last = last[COL_CRYPTO_EMA_FAST]
+    ema_slow_last = last[COL_CRYPTO_EMA_SLOW]
+    ema_fast_prev = prev[COL_CRYPTO_EMA_FAST]
+    ema_slow_prev = prev[COL_CRYPTO_EMA_SLOW]
     rsi = last[COL_CRYPTO_RSI]
-    consec_down = bool(last[COL_CRYPTO_CONSEC_DOWN])
 
     import math
-    if any(math.isnan(v) for v in [close, sma, rsi] if isinstance(v, float)):
+    if any(math.isnan(v) for v in [close, sma_macro, ema_fast_last, ema_slow_last, ema_fast_prev, ema_slow_prev, rsi] if isinstance(v, float)):
         return False
 
-    above_sma = close > sma
-    oversold = rsi < CRYPTO_RSI_OVERSOLD
-    signal = above_sma and (oversold or consec_down)
+    # 1. Filtro de Tendencia Macro
+    macro_uptrend = close > sma_macro
+
+    # 2. Crossover Alcista (Fast cruza por encima de Slow)
+    # Ayer estaba por debajo o igual, hoy esta estrictamente por encima
+    crossover_up = (ema_fast_prev <= ema_slow_prev) and (ema_fast_last > ema_slow_last)
+
+    # 3. Fuerza de Momentum (RSI > 50)
+    strong_momentum = rsi > CRYPTO_RSI_MOMENTUM_MIN
+
+    signal = macro_uptrend and crossover_up and strong_momentum
 
     logger.debug(
-        f"[CRYPTO] Signal -> close={close:.4f}, SMA={sma:.4f}, "
-        f"RSI={rsi:.2f}, ConsecDown={consec_down} -> SIGNAL={signal}"
+        f"[CRYPTO] Signal -> C>{COL_CRYPTO_SMA_MACRO}={macro_uptrend}, "
+        f"CrossUp({CRYPTO_EMA_FAST},{CRYPTO_EMA_SLOW})={crossover_up}, "
+        f"RSI_{CRYPTO_RSI_PERIOD}={rsi:.1f}>50={strong_momentum} -> SIGNAL={signal}"
     )
     return bool(signal)
 
 
 def get_crypto_signal_summary(symbol: str, df: pd.DataFrame) -> dict:
     """Retorna un resumen estructurado del estado de señal cripto."""
-    if df.empty or COL_CRYPTO_SMA not in df.columns:
+    if df.empty or COL_CRYPTO_SMA_MACRO not in df.columns:
         return {"ticker": symbol, "signal": False, "error": "Datos insuficientes"}
 
     last = df.iloc[-1]
+    prev = df.iloc[-2] if len(df) > 1 else last
+    
     atr_val = float(last["atr"]) if "atr" in df.columns and pd.notna(last.get("atr")) else None
+    
+    crossover = False
+    if pd.notna(prev[COL_CRYPTO_EMA_FAST]) and pd.notna(last[COL_CRYPTO_EMA_FAST]):
+        crossover = (prev[COL_CRYPTO_EMA_FAST] <= prev[COL_CRYPTO_EMA_SLOW]) and (last[COL_CRYPTO_EMA_FAST] > last[COL_CRYPTO_EMA_SLOW])
+
     return {
         "ticker": symbol,
         "close": round(float(last["close"]), 4),
-        "sma_50": round(float(last[COL_CRYPTO_SMA]), 4) if pd.notna(last[COL_CRYPTO_SMA]) else None,
-        "rsi_4": round(float(last[COL_CRYPTO_RSI]), 4) if pd.notna(last[COL_CRYPTO_RSI]) else None,
-        "consec_down": bool(last[COL_CRYPTO_CONSEC_DOWN]),
-        "above_sma": bool(last["close"] > last[COL_CRYPTO_SMA]) if pd.notna(last[COL_CRYPTO_SMA]) else False,
+        "sma_macro": round(float(last[COL_CRYPTO_SMA_MACRO]), 4) if pd.notna(last[COL_CRYPTO_SMA_MACRO]) else None,
+        "ema_fast": round(float(last[COL_CRYPTO_EMA_FAST]), 4) if pd.notna(last[COL_CRYPTO_EMA_FAST]) else None,
+        "ema_slow": round(float(last[COL_CRYPTO_EMA_SLOW]), 4) if pd.notna(last[COL_CRYPTO_EMA_SLOW]) else None,
+        "rsi": round(float(last[COL_CRYPTO_RSI]), 4) if pd.notna(last[COL_CRYPTO_RSI]) else None,
+        "macro_uptrend": bool(last["close"] > last[COL_CRYPTO_SMA_MACRO]) if pd.notna(last[COL_CRYPTO_SMA_MACRO]) else False,
+        "crossover_up": crossover,
         "atr": round(atr_val, 4) if atr_val else None,
         "signal": generate_crypto_signal(df),
     }
