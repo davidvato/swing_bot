@@ -384,13 +384,14 @@ Ejemplos:
         "--lookback", type=int, default=8760,
         help="Horas (cripto) o días (equity) de historial a descargar (default: 8760h = 1 año)"
     )
+    import config
     parser.add_argument(
-        "--pt-mult", type=float, default=2.0,
-        help="Multiplicador ATR para barrera de TP (default: 2.0)"
+        "--pt-mult", type=float, default=config.ML_TB_PT_MULT,
+        help=f"Multiplicador ATR para barrera de TP (default: {config.ML_TB_PT_MULT})"
     )
     parser.add_argument(
-        "--sl-mult", type=float, default=1.0,
-        help="Multiplicador ATR para barrera de SL (default: 1.0)"
+        "--sl-mult", type=float, default=config.ML_TB_SL_MULT,
+        help=f"Multiplicador ATR para barrera de SL (default: {config.ML_TB_SL_MULT})"
     )
     parser.add_argument(
         "--horizon", type=int, default=None,

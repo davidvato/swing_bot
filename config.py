@@ -124,7 +124,7 @@ CRYPTO_RSI_MOMENTUM_MIN: float = 50.0 # RSI minimo para confirmar fuerza alcista
 # Ventaja: Se adapta automaticamente a la volatilidad real del activo.
 # Evita "Stop Hunt" / "Whipsaw" en mercados de alta volatilidad.
 CRYPTO_ATR_PERIOD: int = 14          # Periodo ATR (estandar de industria)
-CRYPTO_ATR_TP_MULT: float = 2.0      # Multiplicador TP → captura mas recorrido
+CRYPTO_ATR_TP_MULT: float = 1.5      # Multiplicador TP → reducido a 1.5 para mayor Win Rate
 CRYPTO_ATR_SL_MULT: float = 1.0      # Multiplicador SL → ratio R:R de 2:1
 # Fallback fijo si ATR no se puede calcular (datos insuficientes)
 CRYPTO_TAKE_PROFIT_PCT: float = 0.05
@@ -183,8 +183,8 @@ ML_EQUITY_MODEL_PATH: str = "ml/models/meta_label_equity.txt"
 # Estos valores controlan la geometría de las barreras en ml/train.py.
 # Deben ser consistentes entre los entrenamientos sucesivos para reproducibilidad.
 
-# Multiplicador ATR → barrera de TP. pt_mult=2.0, sl_mult=1.0 → Ratio R:R 2:1.
-ML_TB_PT_MULT: float = 2.0
+# Multiplicador ATR → barrera de TP. pt_mult=1.5, sl_mult=1.0 → Ratio R:R 1.5:1.
+ML_TB_PT_MULT: float = 1.5
 ML_TB_SL_MULT: float = 1.0
 
 # Horizonte temporal máximo (en períodos) antes de declarar Time Exit.
