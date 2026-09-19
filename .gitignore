@@ -29,3 +29,10 @@ env/
 # ─── Coverage ────────────────────────────────────────────────────────────────
 .coverage
 htmlcov/
+
+# ─── ML Models ────────────────────────────────────────────────────────────────
+# Los archivos .txt de boosters LightGBM SÍ se incluyen en el repo
+# para que Render los despliegue automáticamente.
+# El directorio models/ se trackea; ignorar solo archivos temporales de entrenamiento.
+ml/models/*.tmp
+ml/models/*.bak

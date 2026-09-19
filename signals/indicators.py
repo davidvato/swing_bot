@@ -307,9 +307,9 @@ def generate_crypto_signal(df: pd.DataFrame) -> bool:
     oversold = rsi < CRYPTO_RSI_OVERSOLD
     signal = above_sma and (oversold or consec_down)
 
-    logger.info(
-        f"[CRYPTO] Señal → close={close:.4f}, SMA={sma:.4f}, "
-        f"RSI={rsi:.2f}, ConsecDown={consec_down} → SEÑAL={signal}"
+    logger.debug(
+        f"[CRYPTO] Signal -> close={close:.4f}, SMA={sma:.4f}, "
+        f"RSI={rsi:.2f}, ConsecDown={consec_down} -> SIGNAL={signal}"
     )
     return bool(signal)
 

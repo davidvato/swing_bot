@@ -36,10 +36,11 @@ IMPORTANTE — Integridad Temporal:
 import argparse
 import logging
 import sys
+import io
 from datetime import datetime, timedelta
 from pathlib import Path
 
-# ── Ajustar path para importar módulos del bot ────────────────────────────────
+# ── Ajustar path para importar módulos del bot ────────────────────────────────────
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -52,12 +53,20 @@ import os
 from ml.features import build_stationary_features, FEATURE_NAMES
 from ml.labeling import get_triple_barrier_labels, get_purged_train_test_split
 
-# Configurar logging del script
+# ── Configurar logging con UTF-8 explicito (fix Windows CP1252) ──────────────
+# En Windows, sys.stdout usa CP1252 por defecto y no puede emitir
+# caracteres Unicode como -> o guiones de caja. Forzamos UTF-8.
+_utf8_stdout = io.TextIOWrapper(
+    sys.stdout.buffer,
+    encoding="utf-8",
+    errors="replace",
+    line_buffering=True,
+)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
-    handlers=[logging.StreamHandler(sys.stdout)],
+    handlers=[logging.StreamHandler(_utf8_stdout)],
 )
 logger = logging.getLogger("ml.train")
 
@@ -150,7 +159,7 @@ def build_dataset(
     all_y = []
 
     for symbol, df in data_dict.items():
-        logger.info(f"\n── Procesando {symbol} ({len(df)} barras) ──")
+        logger.info(f"  Procesando {symbol} ({len(df)} barras)...")
 
         try:
             # Paso 1: Calcular indicadores de Capa 1
@@ -198,7 +207,7 @@ def build_dataset(
             all_y.append(y_symbol)
 
             logger.info(
-                f"  {symbol}: ✓ {len(X_symbol)} muestras | "
+                f"  {symbol}: OK - {len(X_symbol)} muestras | "
                 f"TP Rate: {y_symbol.mean():.1%}"
             )
 
@@ -217,9 +226,9 @@ def build_dataset(
     assert X.index.equals(y.index), "Error de alineación entre features y labels."
 
     logger.info(
-        f"\n── Dataset consolidado: {len(X)} muestras | "
+        f"  Dataset consolidado: {len(X)} muestras | "
         f"TP Rate global: {y.mean():.1%} | "
-        f"Activos procesados: {len(all_X)} ──"
+        f"Activos procesados: {len(all_X)}"
     )
     return X, y
 
@@ -267,21 +276,27 @@ def train_lightgbm(
     )
 
     # ── Parámetros del modelo ──────────────────────────────────────────────────
+    # Ajustados para datasets pequeños (~3-5k muestras):
+    # - min_child_samples=5 (era 20 → causaba early stop en 3 árboles)
+    # - num_leaves=15 (reduce overfitting en sets pequeños)
+    # - learning_rate=0.03 (convergencia más suave)
     params = {
-        "objective":        "binary",
-        "metric":           ["binary_logloss", "auc"],
-        "learning_rate":    0.05,
-        "n_estimators":     500,
-        "num_leaves":       31,
-        "max_depth":        -1,
-        "min_child_samples": 20,
-        "feature_fraction": 0.8,
-        "bagging_fraction": 0.8,
-        "bagging_freq":     5,
-        "scale_pos_weight": scale_pos_weight,
-        "verbose":          -1,
-        "n_jobs":           -1,
-        "random_state":     42,
+        "objective":         "binary",
+        "metric":            ["binary_logloss", "auc"],
+        "learning_rate":     0.03,
+        "n_estimators":      500,
+        "num_leaves":        15,
+        "max_depth":         4,
+        "min_child_samples": 5,
+        "feature_fraction":  0.8,
+        "bagging_fraction":  0.8,
+        "bagging_freq":      5,
+        "scale_pos_weight":  scale_pos_weight,
+        "lambda_l1":         0.1,
+        "lambda_l2":         0.1,
+        "verbose":           -1,
+        "n_jobs":            -1,
+        "random_state":      42,
     }
 
     dtrain = lgb.Dataset(X_train, label=y_train, feature_name=FEATURE_NAMES)
@@ -310,7 +325,10 @@ def train_lightgbm(
     rec      = recall_score(y_test, y_pred, zero_division=0)
     f1       = f1_score(y_test, y_pred, zero_division=0)
 
-    logger.info("\n── Métricas de Evaluación (Test Set) ──")
+    logger.info("")
+    logger.info("=" * 50)
+    logger.info("  Metricas de Evaluacion (Test Set)")
+    logger.info("=" * 50)
     logger.info(f"  AUC-ROC:   {auc:.4f}  (objetivo: > 0.55)")
     logger.info(f"  Log Loss:  {logloss:.4f}")
     logger.info(f"  Precision: {prec:.4f}")
@@ -324,22 +342,23 @@ def train_lightgbm(
         booster.feature_importance(importance_type="gain").tolist()
     ))
     feat_imp_sorted = sorted(feat_imp.items(), key=lambda x: x[1], reverse=True)
-    logger.info("\n── Feature Importance (gain) ──")
+    logger.info("")
+    logger.info("  Feature Importance (gain):")
     for feat, imp in feat_imp_sorted:
-        bar = "█" * int(imp / max(v for _, v in feat_imp_sorted) * 20)
+        bar = "|" * int(imp / max(v for _, v in feat_imp_sorted) * 20)
         logger.info(f"  {feat:<15}: {bar} ({imp:.1f})")
 
     # Advertencia si el AUC es bajo
     if auc < 0.55:
         logger.warning(
-            f"\n⚠ AUC-ROC={auc:.4f} < 0.55. El modelo tiene escaso poder predictivo. "
-            "Considera: más datos históricos, ajuste de t1_horizon, o revisar features."
+            f"  AUC-ROC={auc:.4f} < 0.55. El modelo tiene escaso poder predictivo. "
+            "Considera: mas datos historicos, ajuste de t1_horizon, o revisar features."
         )
 
     # ── Serializar el Booster ──────────────────────────────────────────────────
     booster.save_model(str(output_path))
-    logger.info(f"\n✓ Modelo guardado en: {output_path.resolve()}")
-    logger.info(f"  Árboles: {booster.num_trees()} | Best iteration: {booster.best_iteration}")
+    logger.info(f"  Modelo guardado en: {output_path.resolve()}")
+    logger.info(f"  Arboles: {booster.num_trees()} | Best iteration: {booster.best_iteration}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -405,16 +424,15 @@ Ejemplos:
         signal_fn = _get_equity_signals
         asset_label = "Equity"
 
-    logger.info(
-        f"\n{'='*60}\n"
-        f"  ENTRENAMIENTO META-LABEL LIGHTGBM — {asset_label}\n"
-        f"{'='*60}\n"
-        f"  Activos:      {list(data_dict.keys())}\n"
-        f"  Lookback:     {args.lookback} {'horas' if args.asset == 'crypto' else 'días'}\n"
-        f"  Triple Barrier: TP×{args.pt_mult} | SL×{args.sl_mult} | Horizon={t1_horizon}\n"
-        f"  Output:       {output_path}\n"
-        f"{'='*60}"
-    )
+    logger.info("")
+    logger.info("=" * 60)
+    logger.info(f"  ENTRENAMIENTO META-LABEL LIGHTGBM -- {asset_label}")
+    logger.info("=" * 60)
+    logger.info(f"  Activos:      {list(data_dict.keys())}")
+    logger.info(f"  Lookback:     {args.lookback} {'horas' if args.asset == 'crypto' else 'dias'}")
+    logger.info(f"  Triple Barrier: TP x{args.pt_mult} | SL x{args.sl_mult} | Horizon={t1_horizon}")
+    logger.info(f"  Output:       {output_path}")
+    logger.info("=" * 60)
 
     # ── Construcción del dataset ───────────────────────────────────────────────
     X, y = build_dataset(
@@ -437,13 +455,12 @@ Ejemplos:
     # ── Entrenamiento ──────────────────────────────────────────────────────────
     train_lightgbm(X_train, y_train, X_test, y_test, output_path)
 
-    logger.info(
-        f"\n{'='*60}\n"
-        f"  ✓ ENTRENAMIENTO COMPLETADO\n"
-        f"  Modelo: {output_path.name}\n"
-        f"  Ahora puedes reiniciar el bot — la Capa 2 se activará automáticamente.\n"
-        f"{'='*60}"
-    )
+    logger.info("")
+    logger.info("=" * 60)
+    logger.info("  ENTRENAMIENTO COMPLETADO")
+    logger.info(f"  Modelo: {output_path.name}")
+    logger.info("  El bot detectara el modelo automaticamente al reiniciar.")
+    logger.info("=" * 60)
 
 
 if __name__ == "__main__":

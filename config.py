@@ -164,7 +164,8 @@ COINGECKO_STABLECOIN_IDS: set = {
 # el bot opera en modo degradado: solo Capa 1 + Kelly estático (comportamiento previo).
 # Esto garantiza zero downtime durante el onboarding del modelo.
 
-ML_ENABLED: bool = True                  # True: activa Capa 2 | False: solo Capa 1
+ML_ENABLED: bool = False                 # DESACTIVADO: modelo actual AUC=0.54 (insuficiente)
+                                         # Re-activar cuando AUC > 0.55 tras re-entrenamiento
 
 # Umbral mínimo de P(TP) para aprobar una señal de Capa 1.
 # Señales con prob < ML_THRESHOLD son descartadas (no se envía orden).
