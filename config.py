@@ -130,10 +130,15 @@ CRYPTO_ATR_SL_MULT: float = 1.0      # Multiplicador SL → ratio R:R de 2:1
 CRYPTO_TAKE_PROFIT_PCT: float = 0.05
 CRYPTO_STOP_LOSS_PCT: float = 0.05
 
-# Parametros de gestion de posicion
+# Parametros de gestion de posicion y riesgo (Cripto)
 CRYPTO_MAX_HOLD_HOURS: int = 72      # Maximo de holding en horas (cripto no cierra)
-CRYPTO_MAX_POSITION_PCT: float = 0.05  # 5% del equity por posicion (conservador)
+CRYPTO_MAX_POSITION_PCT: float = 0.05  # 5% del equity por posicion (conservador individual)
+CRYPTO_MAX_PORTFOLIO_HEAT: float = 0.20 # Limite maximo global de capital en cripto (ej. 20% = 4 posiciones vivas)
 CRYPTO_POLL_INTERVAL_SEC: int = 300  # Supervisor revisa cada 5 min (24/7)
+
+# Criterio de Kelly aislado para Cripto (R:R asimetrico 1.5 a 1)
+CRYPTO_KELLY_WIN_RATE: float = 0.42      # Base historica de la senal Momentum
+CRYPTO_KELLY_WIN_LOSS_RATIO: float = 1.5 # b = 1.5 (TP 1.5 ATR / SL 1.0 ATR)
 
 # Almacenamiento
 CRYPTO_CACHE_FILE: str = "crypto_prices_cache.json"

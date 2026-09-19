@@ -51,6 +51,8 @@ from config import (
     SUPERVISOR_POLL_INTERVAL_SEC,
     MARKET_REGIME_TICKER,
     CRYPTO_MAX_POSITION_PCT,
+    CRYPTO_KELLY_WIN_RATE,
+    CRYPTO_KELLY_WIN_LOSS_RATIO,
     # ─── ML Module ───────────────────────────────────────────────────
     ML_ENABLED,
     ML_THRESHOLD,
@@ -510,8 +512,8 @@ async def run_crypto_signals(
     )
     notional, kelly_pct = compute_notional(
         account_equity=equity,
-        p=KELLY_WIN_RATE,
-        b=KELLY_WIN_LOSS_RATIO,
+        p=CRYPTO_KELLY_WIN_RATE,
+        b=CRYPTO_KELLY_WIN_LOSS_RATIO,
         max_pct=CRYPTO_MAX_POSITION_PCT,
         kelly_multiplier=KELLY_FRACTION,
     )
@@ -577,15 +579,15 @@ async def run_crypto_signals(
                 logger.error(
                     f"[CRYPTO ML] {symbol}: Error en Capa 2: {exc}. Fallback a Kelly base."
                 )
-                ml_prob = KELLY_WIN_RATE
+                ml_prob = CRYPTO_KELLY_WIN_RATE
         else:
-            ml_prob = KELLY_WIN_RATE
+            ml_prob = CRYPTO_KELLY_WIN_RATE
 
         # ── Bet Sizing Dinámico con probabilidad del Meta-Model ───────────────
         notional, kelly_pct = compute_notional(
             account_equity=equity,
             p=ml_prob,
-            b=KELLY_WIN_LOSS_RATIO,
+            b=CRYPTO_KELLY_WIN_LOSS_RATIO,
             max_pct=CRYPTO_MAX_POSITION_PCT,
             kelly_multiplier=KELLY_FRACTION,
         )

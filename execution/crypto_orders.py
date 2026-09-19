@@ -31,7 +31,12 @@ from alpaca.trading.requests import (
 )
 from alpaca.trading.enums import OrderSide, TimeInForce
 
-from config import CRYPTO_MAX_POSITION_PCT, USE_TEST_BUDGET, TEST_BUDGET_USD
+from config import (
+    CRYPTO_MAX_POSITION_PCT,
+    CRYPTO_MAX_PORTFOLIO_HEAT,
+    USE_TEST_BUDGET,
+    TEST_BUDGET_USD,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -265,18 +270,33 @@ class CryptoOrderManager:
         if equity <= 0:
             return False, "Equity no disponible o en cero en broker Alpaca."
 
-        # 1. Verificar si ya existe posición en el broker
         open_positions = self.get_open_positions(include_dust=False)
+        total_crypto_exposure = 0.0
+
+        # 1. Verificar si ya existe posición en el broker y calcular exposición total
         for pos in open_positions:
+            mkt_val = float(pos.market_value) if pos.market_value else 0.0
+            total_crypto_exposure += mkt_val
+            
             if pos.symbol == alpaca_sym or pos.symbol == symbol:
-                mkt_val = float(pos.market_value) if pos.market_value else 0.0
                 return (
                     False,
                     f"Posicion activa existente en Alpaca: {pos.qty} tokens (~${mkt_val:.2f} USD). "
                     f"Regla de riesgo: prohibido promediar a la baja o sobreacumular.",
                 )
 
-        # 2. Verificar límite individual del % de equity
+        # 2. Verificar límite global de portafolio (Portfolio Heat)
+        max_portfolio_exposure = equity * CRYPTO_MAX_PORTFOLIO_HEAT
+        projected_exposure = total_crypto_exposure + notional
+        if projected_exposure > max_portfolio_exposure:
+            return (
+                False,
+                f"Portfolio Heat excedido. Exposición actual (${total_crypto_exposure:.2f}) "
+                f"+ Nocional (${notional:.2f}) > Límite Global de {CRYPTO_MAX_PORTFOLIO_HEAT*100:.1f}% "
+                f"(${max_portfolio_exposure:.2f} USD).",
+            )
+
+        # 3. Verificar límite individual del % de equity
         max_allowed_notional = equity * max_pct * 1.02  # margen 2% por slippage
         if notional > max_allowed_notional:
             return (
