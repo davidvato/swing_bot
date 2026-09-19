@@ -8,7 +8,7 @@ Las credenciales sensibles se cargan exclusivamente desde .env via dotenv.
 
 # ─── MODO PRUEBA: Límite de Budget ─────────────────────────────────────────
 USE_TEST_BUDGET: bool = True       # Activa el límite de capital para pruebas
-TEST_BUDGET_USD: float = 100.0     # Capital simulado total disponible
+TEST_BUDGET_USD: float = 200.0     # Capital simulado total disponible
 
 # ─── Universo de Trading (Fallback Estatico) ─────────────────────────────────
 # IMPORTANTE: Esta lista es el FALLBACK de emergencia del bot.
