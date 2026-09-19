@@ -1,0 +1,51 @@
+{
+  "prices": {
+    "BTC/USD": {
+      "price": 79418.25,
+      "rsi": null,
+      "pct_change": 0.14132948828556893
+    },
+    "ETH/USD": {
+      "price": 2503.145,
+      "rsi": null,
+      "pct_change": 0.3204216179387969
+    },
+    "SOL/USD": {
+      "price": 104.345,
+      "rsi": null,
+      "pct_change": 0.2435357353866574
+    },
+    "XRP/USD": {
+      "price": 1.4039,
+      "rsi": null,
+      "pct_change": 0.1712450945415596
+    },
+    "DOGE/USD": {
+      "price": 0.09124805,
+      "rsi": null,
+      "pct_change": -0.10832320711134512
+    },
+    "ADA/USD": {
+      "price": 0.222345,
+      "rsi": null,
+      "pct_change": 0.08304806660048764
+    },
+    "AVAX/USD": {
+      "price": 8.1372,
+      "rsi": null,
+      "pct_change": 0.2778924537718908
+    },
+    "LINK/USD": {
+      "price": 12.7895,
+      "rsi": null,
+      "pct_change": 0.05867626349554283
+    },
+    "DOT/USD": {
+      "price": 1.057935,
+      "rsi": null,
+      "pct_change": -1.2890132960111882
+    }
+  },
+  "last_updated": "2026-09-08T02:00:07.390628+00:00",
+  "source": "bot_crypto_cycle"
+}

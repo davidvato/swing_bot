@@ -155,3 +155,37 @@ COINGECKO_STABLECOIN_IDS: set = {
     "tether", "usd-coin", "dai", "binance-usd", "true-usd",
     "pax-dollar", "frax", "usdd", "gemini-dollar", "terrausd",
 }
+
+# ─── ML Module (Meta-Labeling LightGBM — Capa 2) ─────────────────────────────
+# Activa el filtro de segundo nivel basado en LightGBM que predice
+# P(Take Profit antes de Stop Loss o Time Exit) — Triple Barrier Method.
+#
+# Si ML_ENABLED = False, o si el archivo de modelo no existe,
+# el bot opera en modo degradado: solo Capa 1 + Kelly estático (comportamiento previo).
+# Esto garantiza zero downtime durante el onboarding del modelo.
+
+ML_ENABLED: bool = True                  # True: activa Capa 2 | False: solo Capa 1
+
+# Umbral mínimo de P(TP) para aprobar una señal de Capa 1.
+# Señales con prob < ML_THRESHOLD son descartadas (no se envía orden).
+# Rango recomendado: [0.52, 0.65]. Umbral más alto = menos trades, más selectivo.
+ML_THRESHOLD: float = 0.55
+
+# Rutas a los archivos de booster LightGBM serializados.
+# Generados ejecutando: python ml/train.py --asset [crypto|equity]
+ML_CRYPTO_MODEL_PATH: str = "ml/models/meta_label_crypto.txt"
+ML_EQUITY_MODEL_PATH: str = "ml/models/meta_label_equity.txt"
+
+# ── Parámetros de Triple Barrier para el script de entrenamiento offline ──────
+# Estos valores controlan la geometría de las barreras en ml/train.py.
+# Deben ser consistentes entre los entrenamientos sucesivos para reproducibilidad.
+
+# Multiplicador ATR → barrera de TP. pt_mult=2.0, sl_mult=1.0 → Ratio R:R 2:1.
+ML_TB_PT_MULT: float = 2.0
+ML_TB_SL_MULT: float = 1.0
+
+# Horizonte temporal máximo (en períodos) antes de declarar Time Exit.
+# Cripto (barras horarias): 72h ≈ 3 días
+# Equity (barras diarias):  5 sesiones ≈ 1 semana de trading
+ML_TB_HORIZON_CRYPTO: int = 72
+ML_TB_HORIZON_EQUITY: int = 5

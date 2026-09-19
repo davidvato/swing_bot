@@ -27,3 +27,17 @@ uvicorn>=0.27.0
 
 # --- Notificaciones ---------------------------------------------------------
 requests>=2.31.0
+
+# ─── Machine Learning (Meta-Labeling — Capa 2) ───────────────────────────────
+# LightGBM: clasificador binario para predecir P(TP antes de SL).
+lightgbm>=4.0.0
+
+# scikit-learn: métricas de evaluación (AUC-ROC, F1) y TimeSeriesSplit.
+scikit-learn>=1.3.0
+
+# numpy: operaciones vectorizadas en features.py y labeling.py.
+numpy>=1.26.0
+
+# shap: interpretabilidad del modelo (feature importances avanzadas).
+# Opcional — solo requerido para análisis, no para producción.
+shap>=0.43.0

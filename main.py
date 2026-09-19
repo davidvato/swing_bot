@@ -51,6 +51,11 @@ from config import (
     SUPERVISOR_POLL_INTERVAL_SEC,
     MARKET_REGIME_TICKER,
     CRYPTO_MAX_POSITION_PCT,
+    # ─── ML Module ───────────────────────────────────────────────────
+    ML_ENABLED,
+    ML_THRESHOLD,
+    ML_EQUITY_MODEL_PATH,
+    ML_CRYPTO_MODEL_PATH,
 )
 from data.ingestion import DataClient
 from signals.indicators import (
@@ -67,6 +72,8 @@ from logging_.trade_log import TradeLogger
 from universe.screener import UniverseScreener
 from universe.crypto_screener import CryptoUniverseScreener
 from data.crypto_ingestion import CryptoDataClient
+from ml.model import MetaLabelModel
+from ml.features import build_stationary_features
 
 # ─── Configuracion del sistema de logging ─────────────────────────────────────
 def _setup_logging() -> None:
@@ -282,6 +289,7 @@ async def run_daily_signals(
     supervisor: PositionSupervisor,
     trade_logger: TradeLogger,
     screener: UniverseScreener,
+    ml_model: MetaLabelModel = None,
 ) -> None:
     """
     Ejecuta el ciclo de deteccion de señales y envio de ordenes.
@@ -363,17 +371,67 @@ async def run_daily_signals(
             continue
 
         df = compute_indicators(data_dict[ticker])
-        signal = generate_signal(df)
+        primary_signal = generate_signal(df)
 
-        if not signal:
-            logger.debug(f"[{ticker}] Sin señal de compra.")
+        if not primary_signal:
+            logger.debug(f"[{ticker}] Sin señal de compra (Capa 1).")
             continue
 
-        logger.info(f"[{ticker}] SEÑAL DE COMPRA DETECTADA. Enviando orden...")
+        # ── Capa 2: Meta-Labeling Inference ──────────────────────────────────
+        # Si el modelo está disponible y ML_ENABLED, filtrar señal y modular Bet Size.
+        # Si no hay modelo, usar Kelly estático (comportamiento previo).
+        if ML_ENABLED and ml_model is not None and ml_model.is_loaded:
+            try:
+                features = build_stationary_features(df)
+                if features.empty:
+                    logger.warning(f"[{ticker}] Features vacías para ML. Usando Kelly base.")
+                    ml_prob = KELLY_WIN_RATE
+                else:
+                    ml_prob = ml_model.predict_proba(features.iloc[-1:])
+                logger.info(
+                    f"[{ticker}] Meta-Label P(TP)={ml_prob:.3f} "
+                    f"(umbral={ML_THRESHOLD})"
+                )
+                if ml_prob < ML_THRESHOLD:
+                    logger.info(
+                        f"[{ticker}] Señal FILTRADA por Meta-Model "
+                        f"(P={ml_prob:.3f} < umbral={ML_THRESHOLD})."
+                    )
+                    continue
+            except Exception as exc:
+                logger.error(
+                    f"[{ticker}] Error en inferencia Capa 2: {exc}. "
+                    "Usando Kelly estático como fallback."
+                )
+                ml_prob = KELLY_WIN_RATE
+        else:
+            # Modo degradado: sin modelo ML, usar parámetro estático de config.py
+            ml_prob = KELLY_WIN_RATE
 
-        # Enviar orden de compra notional
+        # ── Bet Sizing Dinámico modulado por probabilidad del Meta-Model ──────
+        # Si ml_prob = KELLY_WIN_RATE (fallback), el notional es idéntico al anterior.
+        # Si ml_prob viene del modelo, el notional se ajusta a la confianza real.
+        dynamic_notional, kelly_applied = compute_notional(
+            account_equity=equity,
+            p=ml_prob,
+            b=KELLY_WIN_LOSS_RATIO,
+            max_pct=MAX_POSITION_PCT,
+            kelly_multiplier=KELLY_FRACTION,
+        )
+
+        if dynamic_notional <= 0:
+            logger.warning(f"[{ticker}] Notional dinámico = 0. Señal descartada.")
+            continue
+
+        logger.info(
+            f"[{ticker}] SEÑAL DE COMPRA APROBADA (Capa 1 + Capa 2). "
+            f"P(TP)={ml_prob:.3f} | Notional=${dynamic_notional:,.2f}. "
+            "Enviando orden..."
+        )
+
+        # Enviar orden de compra con notional dinámico
         order = await asyncio.get_event_loop().run_in_executor(
-            None, order_manager.submit_buy, ticker, notional
+            None, order_manager.submit_buy, ticker, dynamic_notional
         )
 
         if order is None:
@@ -382,16 +440,16 @@ async def run_daily_signals(
 
         # Obtener precio de entrada aproximado del ultimo cierre
         entry_price = float(df["close"].iloc[-1])
-        # Cantidad estimada de acciones = notional / precio_entrada
-        estimated_qty = notional / entry_price if entry_price > 0 else 0.0
+        # Cantidad estimada de acciones = notional dinámico / precio_entrada
+        estimated_qty = dynamic_notional / entry_price if entry_price > 0 else 0.0
 
         # Registrar compra en el trade log
         trade_logger.log_entry({
             "ticker": ticker,
-            "notional": notional,
+            "notional": dynamic_notional,
             "entry_price": entry_price,
             "qty": estimated_qty,
-            "kelly_pct": kelly_fraction_applied,
+            "kelly_pct": kelly_applied,
         })
 
         # Registrar posicion para supervision TP/SL
@@ -399,8 +457,8 @@ async def run_daily_signals(
             symbol=ticker,
             entry_price=entry_price,
             qty=estimated_qty,
-            notional=notional,
-            kelly_pct=kelly_fraction_applied,
+            notional=dynamic_notional,
+            kelly_pct=kelly_applied,
         )
 
         orders_placed += 1
@@ -429,6 +487,7 @@ async def run_crypto_signals(
     crypto_supervisor: CryptoPositionSupervisor,
     trade_logger: TradeLogger,
     crypto_screener: CryptoUniverseScreener,
+    ml_model: MetaLabelModel = None,
 ) -> None:
     """
     Ciclo de deteccion de señales cripto. Corre cada hora (mercado 24/7).
@@ -495,6 +554,45 @@ async def run_crypto_signals(
         if not generate_crypto_signal(df):
             continue
 
+        # ── Capa 2: Meta-Labeling Inference (Cripto) ──────────────────────────
+        if ML_ENABLED and ml_model is not None and ml_model.is_loaded:
+            try:
+                features = build_stationary_features(df)
+                if features.empty:
+                    logger.warning(f"[CRYPTO ML] {symbol}: Features vacías. Usando Kelly base.")
+                    ml_prob = KELLY_WIN_RATE
+                else:
+                    ml_prob = ml_model.predict_proba(features.iloc[-1:])
+                logger.info(
+                    f"[CRYPTO ML] {symbol}: P(TP)={ml_prob:.3f} "
+                    f"(umbral={ML_THRESHOLD})"
+                )
+                if ml_prob < ML_THRESHOLD:
+                    logger.info(
+                        f"[CRYPTO ML] {symbol}: Señal FILTRADA "
+                        f"(P={ml_prob:.3f} < {ML_THRESHOLD})."
+                    )
+                    continue
+            except Exception as exc:
+                logger.error(
+                    f"[CRYPTO ML] {symbol}: Error en Capa 2: {exc}. Fallback a Kelly base."
+                )
+                ml_prob = KELLY_WIN_RATE
+        else:
+            ml_prob = KELLY_WIN_RATE
+
+        # ── Bet Sizing Dinámico con probabilidad del Meta-Model ───────────────
+        notional, kelly_pct = compute_notional(
+            account_equity=equity,
+            p=ml_prob,
+            b=KELLY_WIN_LOSS_RATIO,
+            max_pct=CRYPTO_MAX_POSITION_PCT,
+            kelly_multiplier=KELLY_FRACTION,
+        )
+        if notional <= 0:
+            logger.warning(f"[CRYPTO] {symbol}: Notional dinámico = 0. Descartado.")
+            continue
+
         # ── Control Cuantitativo de Riesgo: verificar broker & Portfolio Heat ───
         can_open, risk_reason = await asyncio.get_event_loop().run_in_executor(
             None,
@@ -509,7 +607,10 @@ async def run_crypto_signals(
             )
             continue
 
-        logger.info(f"[CRYPTO] {symbol}: SEÑAL DE COMPRA. Enviando orden bracket...")
+        logger.info(
+            f"[CRYPTO] {symbol}: SEÑAL APROBADA (Capa 1 + Capa 2). "
+            f"P(TP)={ml_prob:.3f} | Notional=${notional:,.2f}. Enviando orden bracket..."
+        )
 
         entry_price = float(last["close"])
         atr_val = float(last["atr"]) if "atr" in df.columns and not pd.isna(last.get("atr", float("nan"))) else None
@@ -615,6 +716,8 @@ async def run_main_loop(
     crypto_order_manager: CryptoOrderManager = None,
     crypto_supervisor: CryptoPositionSupervisor = None,
     crypto_screener: CryptoUniverseScreener = None,
+    ml_equity_model: MetaLabelModel = None,
+    ml_crypto_model: MetaLabelModel = None,
 ) -> None:
     """
     Loop principal asincrono del bot.
@@ -687,7 +790,8 @@ async def run_main_loop(
                         "Ejecutando ciclo de señales..."
                     )
                     await run_daily_signals(
-                        data_client, order_manager, supervisor, trade_logger, screener
+                        data_client, order_manager, supervisor, trade_logger, screener,
+                        ml_model=ml_equity_model,
                     )
                     last_signal_date = today
                     
@@ -710,6 +814,7 @@ async def run_main_loop(
                 await run_crypto_signals(
                     crypto_data_client, crypto_order_manager,
                     crypto_supervisor, trade_logger, crypto_screener,
+                    ml_model=ml_crypto_model,
                 )
                 last_crypto_hour = current_hour
 
@@ -819,12 +924,11 @@ Ejemplos de uso:
     screener = UniverseScreener(api_key, secret_key)
 
     # ─── Inicializar componentes de Cripto ────────────────────────────────────
-    # DESHABILITADO TEMPORALMENTE (Cripto no funcional)
-    # crypto_order_manager = CryptoOrderManager(api_key, secret_key)
-    # crypto_data_client = CryptoDataClient(api_key, secret_key)
-    # crypto_supervisor = CryptoPositionSupervisor(crypto_order_manager, trade_logger)
-    # crypto_screener = CryptoUniverseScreener()
-    # logger.info("Modulo de criptomonedas inicializado (CoinGecko + Alpaca Crypto).")
+    crypto_order_manager = CryptoOrderManager(api_key, secret_key)
+    crypto_data_client = CryptoDataClient(api_key, secret_key)
+    crypto_supervisor = CryptoPositionSupervisor(crypto_order_manager, trade_logger)
+    crypto_screener = CryptoUniverseScreener()
+    logger.info("Módulo de criptomonedas inicializado (CoinGecko + Alpaca Crypto).")
 
     # Inyectar dependencias en el scheduler (incluyendo el screener)
     init_scheduler(order_manager, supervisor, trade_logger, screener)
@@ -851,7 +955,24 @@ Ejemplos de uso:
 
     # ─── Modo: Produccion — Loop principal ────────────────────────────────────
     logger.info("Iniciando loop principal del bot y panel de control (Dashboard)...")
-    
+
+    # ── Cargar modelos ML en memoria (una sola vez al arrancar) ───────────────
+    # Si los archivos .txt no existen, MetaLabelModel.load() retorna None y el
+    # bot opera en modo degradado (solo Capa 1 + Kelly estático).
+    ml_equity_model = None
+    ml_crypto_model = None
+    if ML_ENABLED:
+        logger.info("[ML] Cargando modelos Meta-Label LightGBM...")
+        ml_equity_model = MetaLabelModel.load(ML_EQUITY_MODEL_PATH)
+        ml_crypto_model = MetaLabelModel.load(ML_CRYPTO_MODEL_PATH)
+        if ml_equity_model is None and ml_crypto_model is None:
+            logger.warning(
+                "[ML] Ningún modelo encontrado. El bot opera en modo Capa 1 sola. "
+                "Entrena los modelos con: python ml/train.py --asset [crypto|equity]"
+            )
+    else:
+        logger.info("[ML] ML_ENABLED=False. Capa 2 desactivada por configuración.")
+
     dashboard_process = None
     try:
         # Iniciar panel de control
@@ -865,10 +986,12 @@ Ejemplos de uso:
         asyncio.run(
             run_main_loop(
                 order_manager, data_client, supervisor, trade_logger, screener,
-                crypto_data_client=None,
-                crypto_order_manager=None,
-                crypto_supervisor=None,
-                crypto_screener=None,
+                crypto_data_client=crypto_data_client,
+                crypto_order_manager=crypto_order_manager,
+                crypto_supervisor=crypto_supervisor,
+                crypto_screener=crypto_screener,
+                ml_equity_model=ml_equity_model,
+                ml_crypto_model=ml_crypto_model,
             )
         )
     except KeyboardInterrupt:

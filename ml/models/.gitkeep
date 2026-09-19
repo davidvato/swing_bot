@@ -1,0 +1,15 @@
+# ml/models/ — Directorio de modelos LightGBM serializados
+#
+# Este directorio contiene los archivos .txt de los boosters LightGBM
+# generados por ml/train.py.
+#
+# Archivos esperados:
+#   meta_label_crypto.txt  — Meta-Model para criptomonedas (barras horarias)
+#   meta_label_equity.txt  — Meta-Model para equities (barras diarias)
+#
+# Generación:
+#   python ml/train.py --asset crypto
+#   python ml/train.py --asset equity
+#
+# Los archivos .txt son excluidos de git (ver .gitignore).
+# Cada equipo/entorno debe regenerar sus propios modelos.
