@@ -221,13 +221,32 @@ class CryptoPositionSupervisor:
                     f"Horas={hours_held:.1f}/{CRYPTO_MAX_HOLD_HOURS}"
                 )
 
-                # ── Fallback de timeout: forzar cierre si supera max horas ───
+                # ── Fallback 1: Local Emulation (Si Alpaca ignora el bracket) ──
+                if current_price >= record.target_tp:
+                    logger.warning(
+                        f"[CRYPTO {symbol}] LOCAL TP TRIGGER. "
+                        f"Precio actual (${current_price:.4f}) >= TP (${record.target_tp:.4f}). "
+                        f"Forzando cierre a mercado..."
+                    )
+                    await self._execute_manual_exit(record, current_price, "CRYPTO_SELL_TP_FALLBACK")
+                    break
+
+                if current_price <= record.target_sl:
+                    logger.warning(
+                        f"[CRYPTO {symbol}] LOCAL SL TRIGGER. "
+                        f"Precio actual (${current_price:.4f}) <= SL (${record.target_sl:.4f}). "
+                        f"Forzando cierre a mercado..."
+                    )
+                    await self._execute_manual_exit(record, current_price, "CRYPTO_SELL_SL_FALLBACK")
+                    break
+
+                # ── Fallback 2: Timeout por limite de tiempo ───
                 if hours_held >= CRYPTO_MAX_HOLD_HOURS:
                     logger.warning(
                         f"[CRYPTO {symbol}] TIMEOUT ({hours_held:.1f}h). "
                         f"Cancelando legs OCO y ejecutando venta a mercado..."
                     )
-                    await self._execute_timeout_exit(record, current_price)
+                    await self._execute_manual_exit(record, current_price, "CRYPTO_SELL_TIME")
                     break
 
             except asyncio.CancelledError:
@@ -343,12 +362,13 @@ class CryptoPositionSupervisor:
         async with self._lock:
             self._positions.pop(symbol, None)
 
-    async def _execute_timeout_exit(
-        self, record: CryptoPositionRecord, current_price: float
+    async def _execute_manual_exit(
+        self, record: CryptoPositionRecord, current_price: float, exit_type: str
     ) -> None:
         """
-        Fallback de timeout: cancela las legs OCO pendientes y envia una
+        Fallback manual: cancela las legs OCO pendientes y envia una
         orden de venta a mercado para cerrar la posicion forzadamente.
+        Se usa cuando se activa el local SL/TP, o por timeout de tiempo.
         """
         symbol = record.symbol
 
@@ -381,7 +401,7 @@ class CryptoPositionSupervisor:
             )
             return
 
-        await self._log_exit(record, current_price, "CRYPTO_SELL_TIME")
+        await self._log_exit(record, current_price, exit_type)
 
     def start(self) -> None:
         """Lanza corutinas de supervision para todas las posiciones registradas."""
