@@ -2,7 +2,8 @@
 scheduler/weekly_close.py — Planificador de Liquidacion Semanal (Viernes)
 ==========================================================================
 Implementa el planificador que ejecuta la liquidacion total del portafolio
-cada viernes a las 15:45 EST (15 minutos antes del cierre del mercado NYSE).
+de EQUITIES cada viernes a las 15:45 EST (15 minutos antes del cierre del
+mercado NYSE).
 
 DISEÑO DE RESILIENCIA:
     Se usa doble validacion para garantizar la ejecucion del cierre semanal:
@@ -11,11 +12,11 @@ DISEÑO DE RESILIENCIA:
     Esta redundancia protege ante reinicios del proceso, derives de reloj, etc.
 
 ADVERTENCIA CRITICA:
-    La liquidacion invoca close_all_positions(cancel_orders=True).
-    El parametro cancel_orders=True es OBLIGATORIO para evitar la condicion
-    de carrera "Insufficient qty available for order" que ocurre cuando hay
-    ordenes pendientes que intentan ejecutarse sobre posiciones en proceso
-    de liquidacion.
+    Las posiciones de CRIPTO son excluidas deliberadamente de la liquidacion
+    del viernes. El mercado cripto opera 24/7 y sus posiciones estan
+    gestionadas exclusivamente por CryptoPositionSupervisor con
+    CRYPTO_MAX_HOLD_HOURS. Cerrarlas el viernes destruiria el momentum del
+    fin de semana y generaria costos de spread/fees innecesarios.
 """
 
 import logging
@@ -64,7 +65,7 @@ def initialize(order_manager, supervisor, trade_logger, screener=None) -> None:
     _screener = screener
     logger.info(
         "WeeklyClose scheduler inicializado. "
-        f"Liquidacion programada cada viernes a las {WEEKLY_CLOSE_TIME_EST} EST. "
+        f"Liquidacion de equities programada cada viernes a las {WEEKLY_CLOSE_TIME_EST} EST. "
         f"Actualizacion de universo cada lunes a las {UNIVERSE_UPDATE_TIME_EST} EST."
     )
 
@@ -138,8 +139,8 @@ def update_universe() -> list[str] | None:
 
     now_est = datetime.now(EST)
     logger.info(
-        f"ACTUALIZACION DE UNIVERSO — "
-        f"{now_est.strftime('%Y-%m-%d %H:%M:%S %Z')} — "
+        f"ACTUALIZACION DE UNIVERSO \u2014 "
+        f"{now_est.strftime('%Y-%m-%d %H:%M:%S %Z')} \u2014 "
         "Ejecutando screener..."
     )
 
@@ -159,13 +160,19 @@ def update_universe() -> list[str] | None:
 
 def friday_liquidation() -> None:
     """
-    Ejecuta la liquidacion total del portafolio.
+    Ejecuta la liquidacion semanal de EQUITIES (NYSE cierra a las 16:00 EST).
 
-    Secuencia de acciones:
+    IMPORTANTE: Las posiciones de CRIPTO son excluidas deliberadamente.
+    El mercado cripto opera 24/7 y sus posiciones estan gestionadas
+    exclusivamente por CryptoPositionSupervisor con CRYPTO_MAX_HOLD_HOURS.
+    Cerrarlas el viernes destruiria el momentum del fin de semana y
+    generaria costos de spread/fees innecesarios (bug corregido v2.0).
+
+    Secuencia de acciones (solo equities):
     1. Verificar guard interno (is_friday_close_time).
-    2. Obtener lista de posiciones abiertas y sus precios para el log.
-    3. Cancelar todas las corutinas del supervisor asyncio.
-    4. Ejecutar close_all_positions(cancel_orders=True) via OrderManager.
+    2. Obtener lista de posiciones de equity abiertas (filtradas por OrderManager).
+    3. Cancelar corutinas del supervisor asyncio de equities.
+    4. Enviar orden de venta de mercado por cada posicion de equity individualmente.
     5. Registrar cada posicion cerrada en el trade log con tipo SELL_EOW.
 
     Esta funcion es llamada por el modulo 'schedule' y tambien puede
@@ -190,16 +197,18 @@ def friday_liquidation() -> None:
 
     now_est = datetime.now(EST)
     logger.warning(
-        f"INICIO LIQUIDACION SEMANAL — {now_est.strftime('%Y-%m-%d %H:%M:%S %Z')} — "
-        "Cerrando todas las posiciones..."
+        f"INICIO LIQUIDACION SEMANAL (EQUITIES) \u2014 {now_est.strftime('%Y-%m-%d %H:%M:%S %Z')} \u2014 "
+        "Cerrando posiciones de equity (cripto excluida)..."
     )
 
-    # ─── Paso 1: Capturar estado de posiciones ANTES de cerrar ────────────────
+    # \u2500\u2500\u2500 Paso 1: Capturar posiciones de EQUITY ANTES de cerrar \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+    # get_open_positions() en OrderManager ya filtra solo us_equity (asset_class != crypto).
     open_positions = []
     try:
         open_positions = _order_manager.get_open_positions()
         logger.info(
-            f"Posiciones abiertas a liquidar: {len(open_positions)}"
+            f"Posiciones de equity a liquidar: {len(open_positions)} "
+            f"(posiciones cripto NO se tocan \u2014 operan 24/7 con su propio supervisor)"
         )
         for pos in open_positions:
             logger.info(
@@ -210,25 +219,32 @@ def friday_liquidation() -> None:
     except Exception as exc:
         logger.error(f"Error al obtener posiciones abiertas: {exc}")
 
-    # ─── Paso 2: Detener el supervisor asyncio ────────────────────────────────
+    # \u2500\u2500\u2500 Paso 2: Detener el supervisor asyncio de EQUITIES \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
     if _supervisor is not None:
         try:
             _supervisor.stop_all()
-            logger.info("Supervisor asyncio detenido.")
+            logger.info("Supervisor asyncio de equities detenido.")
         except Exception as exc:
             logger.error(f"Error al detener el supervisor: {exc}")
 
-    # ─── Paso 3: Ejecutar liquidacion total ───────────────────────────────────
-    try:
-        _order_manager.close_all()  # Invoca close_all_positions(cancel_orders=True)
-    except Exception as exc:
-        logger.error(
-            f"Error critico durante liquidacion: {exc}. "
-            "Verificar cuenta en Alpaca Dashboard inmediatamente."
-        )
-        return
+    # \u2500\u2500\u2500 Paso 3: Cerrar solo posiciones de equity una por una \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+    # NOTA: NO se usa close_all_positions() porque cierra TODAS las posiciones
+    # en Alpaca, incluyendo cripto. Iteramos y vendemos solo las posiciones
+    # de equity filtradas en el Paso 1 para no tocar cripto.
+    if open_positions:
+        for pos in open_positions:
+            try:
+                _order_manager.submit_sell(pos.symbol, float(pos.qty))
+                logger.info(f"  Sell a mercado enviado: {pos.symbol} qty={pos.qty}")
+            except Exception as exc:
+                logger.error(
+                    f"  Error cerrando {pos.symbol}: {exc}. "
+                    "Verificar cuenta en Alpaca Dashboard."
+                )
+    else:
+        logger.info("Sin posiciones de equity abiertas para liquidar este viernes.")
 
-    # ─── Paso 4: Registrar cada cierre en el trade log ────────────────────────
+    # \u2500\u2500\u2500 Paso 4: Registrar cada cierre en el trade log \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
     if _trade_logger is not None:
         for pos in open_positions:
             try:
@@ -259,7 +275,8 @@ def friday_liquidation() -> None:
                 )
 
     logger.warning(
-        f"LIQUIDACION SEMANAL COMPLETADA — {len(open_positions)} posiciones cerradas."
+        f"LIQUIDACION SEMANAL DE EQUITIES COMPLETADA \u2014 {len(open_positions)} posiciones cerradas. "
+        "Las posiciones cripto siguen activas bajo su supervisor 24/7."
     )
 
 
@@ -268,7 +285,7 @@ def setup_schedule() -> None:
     Configura los trabajos programados del bot.
 
     Jobs registrados:
-      - Viernes WEEKLY_CLOSE_TIME_EST: friday_liquidation() — liquidacion total.
+      - Viernes WEEKLY_CLOSE_TIME_EST: friday_liquidation() — liquidacion de equities.
       - Lunes UNIVERSE_UPDATE_TIME_EST: update_universe() — seleccion dinamica.
 
     NOTA: El modulo 'schedule' trabaja con la hora del sistema. Si el servidor
@@ -282,8 +299,8 @@ def setup_schedule() -> None:
     schedule.every().monday.at(UNIVERSE_UPDATE_TIME_EST).do(update_universe)
     logger.info(
         f"Schedule configurado:\n"
-        f"  - friday_liquidation() → cada viernes a las {WEEKLY_CLOSE_TIME_EST}\n"
-        f"  - update_universe()    → cada lunes   a las {UNIVERSE_UPDATE_TIME_EST}"
+        f"  - friday_liquidation() \u2192 cada viernes a las {WEEKLY_CLOSE_TIME_EST} (solo equities)\n"
+        f"  - update_universe()    \u2192 cada lunes   a las {UNIVERSE_UPDATE_TIME_EST}"
     )
 
 

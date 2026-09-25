@@ -119,13 +119,14 @@ CRYPTO_RSI_MOMENTUM_MIN: float = 50.0 # RSI minimo para confirmar fuerza alcista
 
 # ─── TP/SL Dinamico basado en ATR (Average True Range) ───────────────────────
 # Formula:
-#   TP = entry_price + (ATR_14 × CRYPTO_ATR_TP_MULT)  → Risk/Reward 2:1
+#   TP = entry_price + (ATR_14 × CRYPTO_ATR_TP_MULT)  → R:R 1.25:1
 #   SL = entry_price - (ATR_14 × CRYPTO_ATR_SL_MULT)
 # Ventaja: Se adapta automaticamente a la volatilidad real del activo.
-# Evita "Stop Hunt" / "Whipsaw" en mercados de alta volatilidad.
+# CRYPTO_ATR_SL_MULT subido de 1.0 → 1.2 para reducir stop hunts/whipsaw.
+# Con SL_MULT=1.2 damos un 20% mas de holgura ante volatilidad intradiaria.
 CRYPTO_ATR_PERIOD: int = 14          # Periodo ATR (estandar de industria)
-CRYPTO_ATR_TP_MULT: float = 1.5      # Multiplicador TP → reducido a 1.5 para mayor Win Rate
-CRYPTO_ATR_SL_MULT: float = 1.0      # Multiplicador SL → ratio R:R de 2:1
+CRYPTO_ATR_TP_MULT: float = 1.5      # Multiplicador TP → 1.5x ATR sobre precio de entrada
+CRYPTO_ATR_SL_MULT: float = 1.2      # Multiplicador SL → 1.2x ATR (subido de 1.0, anti-whipsaw)
 # Fallback fijo si ATR no se puede calcular (datos insuficientes)
 CRYPTO_TAKE_PROFIT_PCT: float = 0.05
 CRYPTO_STOP_LOSS_PCT: float = 0.05
