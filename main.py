@@ -774,6 +774,7 @@ async def run_main_loop(
         logger.error(f"Error cargando estado: {e}")
         
     last_crypto_hour = None   # Para ejecutar el ciclo cripto 1x por hora
+    last_summary_month = None # Para evitar enviar resumen repetido
 
     while True:
         try:
@@ -823,9 +824,11 @@ async def run_main_loop(
             # ─── Exportar CSV al fin de mes ────────────────────────────────────
             if _is_last_day_of_month() and now_est.hour == 16:
                 month_str = now_est.strftime("%Y-%m")
-                logger.info(f"Exportando resumen mensual: {month_str}...")
-                trade_logger.export_csv(month=month_str)
-                trade_logger.get_monthly_summary(month=month_str)
+                if last_summary_month != month_str:
+                    logger.info(f"Exportando resumen mensual: {month_str}...")
+                    trade_logger.export_csv(month=month_str)
+                    trade_logger.get_monthly_summary(month=month_str)
+                    last_summary_month = month_str
 
             # Esperar 30 segundos antes del siguiente ciclo de verificacion
             await asyncio.sleep(30)
