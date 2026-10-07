@@ -7,6 +7,7 @@ document.addEventListener('DOMContentLoaded', () => {
     fetchCryptoMetrics();
     fetchCryptoPrices();
     fetchCryptoTrades();
+    fetchManualTickers();
     // Auto-refresh crypto prices every 60 seconds
     setInterval(fetchCryptoPrices, 60000);
 });
@@ -865,5 +866,89 @@ async function syncFromAlpaca() {
             statusEl.textContent = '';
             icon.textContent = '\uD83D\uDD04';
         }, 8000);
+    }
+}
+
+// ─── Manual Tickers Search & Add ─────────────────────────────────────────────
+
+async function searchCompany() {
+    const input = document.getElementById('company-search-input');
+    const q = input.value.trim();
+    if (!q) return;
+    const resContainer = document.getElementById('company-search-results');
+    resContainer.innerHTML = '<span style="font-size: 0.8rem; color: #cbd5e1;">Buscando...</span>';
+    try {
+        const res = await fetch('/api/search_company?q=' + encodeURIComponent(q));
+        const data = await res.json();
+        resContainer.innerHTML = '';
+        if (data.length === 0) {
+            resContainer.innerHTML = '<span style="font-size: 0.8rem; color: #cbd5e1;">No se encontraron resultados.</span>';
+            return;
+        }
+        data.forEach(item => {
+            const div = document.createElement('div');
+            div.style.background = 'rgba(255,255,255,0.1)';
+            div.style.padding = '0.4rem';
+            div.style.borderRadius = '4px';
+            div.style.display = 'flex';
+            div.style.justifyContent = 'space-between';
+            div.style.alignItems = 'center';
+            div.innerHTML = `<span style="font-size: 0.85rem;"><strong>${item.symbol}</strong> - ${item.shortname || ''}</span>`;
+            
+            const addBtn = document.createElement('button');
+            addBtn.textContent = 'Add';
+            addBtn.style.background = '#10b981';
+            addBtn.style.color = 'white';
+            addBtn.style.border = 'none';
+            addBtn.style.borderRadius = '4px';
+            addBtn.style.cursor = 'pointer';
+            addBtn.style.padding = '0.2rem 0.5rem';
+            addBtn.style.fontSize = '0.8rem';
+            addBtn.onclick = () => addManualTicker(item.symbol);
+            
+            div.appendChild(addBtn);
+            resContainer.appendChild(div);
+        });
+    } catch(e) {
+        resContainer.innerHTML = '<span style="font-size: 0.8rem; color: #ef4444;">Error en la búsqueda.</span>';
+    }
+}
+
+async function fetchManualTickers() {
+    try {
+        const res = await fetch('/api/manual_tickers');
+        const data = await res.json();
+        const container = document.getElementById('manual-tickers-container');
+        if (!container) return;
+        container.innerHTML = '';
+        if (data.length === 0) {
+            container.innerHTML = '<span class="tag" style="background:rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);">Ninguno</span>';
+        } else {
+            data.forEach(t => {
+                const span = document.createElement('span');
+                span.className = 'tag';
+                span.style.background = '#6366f1';
+                span.style.border = '1px solid #4f46e5';
+                span.textContent = t;
+                container.appendChild(span);
+            });
+        }
+    } catch(e) {
+        console.error('Error fetching manual tickers', e);
+    }
+}
+
+async function addManualTicker(ticker) {
+    try {
+        await fetch('/api/manual_tickers', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ticker: ticker})
+        });
+        document.getElementById('company-search-input').value = '';
+        document.getElementById('company-search-results').innerHTML = '';
+        fetchManualTickers();
+    } catch(e) {
+        console.error('Error adding ticker', e);
     }
 }

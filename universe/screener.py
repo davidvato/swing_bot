@@ -403,21 +403,38 @@ class UniverseScreener:
 
     def get_active_universe(self) -> list[str]:
         """
-        Retorna el universo activo actual.
+        Retorna el universo activo actual, incluyendo cualquier ticker 
+        definido manualmente en manual_tickers.txt.
 
         Si aun no se ha ejecutado el screener (primera vez sin cache),
-        retorna el fallback estatico de config.TICKERS.
+        retorna el fallback estatico de config.TICKERS mas los manuales.
 
         Returns:
-            Lista de tickers activos.
+            Lista de tickers activos combinados.
         """
-        if not self._active_universe:
+        base_universe = list(self._active_universe)
+        if not base_universe:
             logger.warning(
                 "[Screener] Universo aun no inicializado. "
                 "Usando TICKERS estatico de config.py como fallback."
             )
-            return list(FALLBACK_TICKERS)
-        return list(self._active_universe)
+            base_universe = list(FALLBACK_TICKERS)
+            
+        # Agregar tickers definidos manualmente por el usuario
+        manual_file = Path("manual_tickers.txt")
+        if manual_file.exists():
+            try:
+                manual_tickers = [
+                    line.strip().upper() for line in manual_file.read_text(encoding="utf-8").splitlines() 
+                    if line.strip() and not line.startswith("#")
+                ]
+                for mt in manual_tickers:
+                    if mt not in base_universe:
+                        base_universe.append(mt)
+            except Exception as e:
+                logger.error(f"[Screener] Error leyendo manual_tickers.txt: {e}")
+                
+        return base_universe
 
     def get_status(self) -> dict:
         """

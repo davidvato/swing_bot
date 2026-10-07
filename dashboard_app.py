@@ -144,6 +144,47 @@ def get_bot_config():
         "Universe": config.TICKERS
     }
 
+@app.get("/api/search_company")
+def search_company(q: str):
+    """Searches for a company ticker by name using Yahoo Finance."""
+    import requests
+    url = f"https://query2.finance.yahoo.com/v1/finance/search?q={q}"
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    try:
+        resp = requests.get(url, headers=headers)
+        data = resp.json()
+        quotes = data.get("quotes", [])
+        results = [
+            {"symbol": q.get("symbol"), "shortname": q.get("shortname"), "exchange": q.get("exchDisp")}
+            for q in quotes if q.get("quoteType") in ["EQUITY", "ETF"]
+        ]
+        return results
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+class TickerAdd(BaseModel):
+    ticker: str
+
+@app.get("/api/manual_tickers")
+def get_manual_tickers():
+    from pathlib import Path
+    p = Path("manual_tickers.txt")
+    if p.exists():
+        return [l.strip().upper() for l in p.read_text(encoding="utf-8").splitlines() if l.strip() and not l.startswith("#")]
+    return []
+
+@app.post("/api/manual_tickers")
+def add_manual_ticker(data: TickerAdd):
+    from pathlib import Path
+    p = Path("manual_tickers.txt")
+    if not p.exists():
+        p.write_text("# Manual Tickers\n", encoding="utf-8")
+    tickers = get_manual_tickers()
+    if data.ticker.upper() not in tickers:
+        with p.open("a", encoding="utf-8") as f:
+            f.write(f"\n{data.ticker.upper()}\n")
+    return {"status": "ok", "ticker": data.ticker.upper()}
+
 
 @app.get("/api/universe")
 def get_universe():
@@ -193,8 +234,9 @@ def get_budget():
     API_KEY = os.getenv("ALPACA_API_KEY")
     SECRET_KEY = os.getenv("ALPACA_SECRET_KEY")
     PAPER = os.getenv("ALPACA_PAPER", "True") == "True"
-    
+
     # Check if Alpaca is configured and available
+
     if alpaca_available and API_KEY and SECRET_KEY:
         try:
             client = TradingClient(API_KEY, SECRET_KEY, paper=PAPER)

@@ -37,6 +37,19 @@
             <div class="market-universe">
                 <h3>Equity Universe</h3>
                 <div id="tickers-container" class="tags"></div>
+                
+                <div class="search-company-container" style="margin-top: 1rem;">
+                    <h4>➕ Add Company</h4>
+                    <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
+                        <input type="text" id="company-search-input" placeholder="e.g. Coca cola" style="flex:1; padding: 0.4rem; border-radius: 4px; border: 1px solid rgba(255,255,255,0.2); background: rgba(0,0,0,0.3); color: white;" onkeypress="if(event.key === 'Enter') searchCompany()">
+                        <button onclick="searchCompany()" style="padding: 0.4rem 0.8rem; background: #6366f1; color: white; border: none; border-radius: 4px; cursor: pointer;">Buscar</button>
+                    </div>
+                    <div id="company-search-results" style="margin-top: 0.5rem; max-height: 150px; overflow-y: auto; display: flex; flex-direction: column; gap: 0.3rem;"></div>
+                    <div id="manual-tickers-list" style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(255,255,255,0.1);">
+                        <h4>Manual Tickers:</h4>
+                        <div id="manual-tickers-container" class="tags" style="margin-top: 0.5rem;"></div>
+                    </div>
+                </div>
             </div>
 
             <div class="market-universe crypto-universe-sidebar">

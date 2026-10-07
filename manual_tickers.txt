@@ -1,0 +1,6 @@
+# Añade aquí los tickers (Equities) que deseas analizar manualmente.
+# Un ticker por línea. Estos tickers se añadirán al universo dinámico
+# del bot en la próxima ejecución del ciclo de señales o en el dry run.
+# Ejemplo:
+# MELI
+# ROKU
