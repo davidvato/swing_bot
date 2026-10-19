@@ -21,6 +21,8 @@ from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import MarketOrderRequest, GetAssetsRequest
 from alpaca.trading.enums import OrderSide, TimeInForce, AssetClass
 from alpaca.trading.models import Order, Position, TradeAccount
+from alpaca.data.historical import StockHistoricalDataClient
+from alpaca.data.requests import StockLatestTradeRequest
 
 from config import REQUEST_INTERVAL_SEC, MAX_RETRY_ATTEMPTS, USE_TEST_BUDGET, TEST_BUDGET_USD
 
@@ -68,7 +70,8 @@ class OrderManager:
 
     def __init__(self, api_key: str, secret_key: str) -> None:
         """
-        Inicializa el TradingClient en modo paper trading exclusivamente.
+        Inicializa el TradingClient en modo paper trading exclusivamente
+        y el StockHistoricalDataClient para cotizaciones de mercado en tiempo real.
 
         Args:
             api_key: Clave publica de Alpaca (desde .env).
@@ -80,7 +83,13 @@ class OrderManager:
             secret_key=secret_key,
             paper=True,  # NUNCA cambiar a False sin autorizacion explicita del usuario
         )
-        logger.info("OrderManager inicializado en modo PAPER TRADING (paper=True).")
+        self._data_client = StockHistoricalDataClient(
+            api_key=api_key,
+            secret_key=secret_key,
+        )
+        logger.info(
+            "OrderManager inicializado en modo PAPER TRADING (paper=True) con feeds de cotización en tiempo real."
+        )
 
     @rate_limited
     def get_account(self) -> TradeAccount:
@@ -206,34 +215,41 @@ class OrderManager:
     @rate_limited
     def get_latest_quote(self, symbol: str) -> float:
         """
-        Obtiene el precio mas reciente de un simbolo para el supervisor TP/SL.
+        Obtiene el precio mas reciente en tiempo real para el supervisor TP/SL.
 
-        Usa el precio de cierre de la ultima barra disponible como proxy
-        del precio actual (adecuado para supervision con intervalo de 60s).
+        Consulta el ultimo trade ejecutado en el mercado via StockHistoricalDataClient
+        para evitar el retraso de 15 minutos de pos.current_price en Alpaca Paper Trading.
+        Verifica previamente si la posicion sigue abierta en la cuenta.
 
         Args:
             symbol: Simbolo bursatil.
 
         Returns:
-            Precio actual de mercado como float.
+            Precio actual de mercado como float (0.0 si la posicion ya fue cerrada).
         """
-        from alpaca.data.historical import StockHistoricalDataClient
-        from alpaca.data.requests import StockLatestQuoteRequest
+        # 1. Verificar si la posicion sigue abierta en Alpaca
+        try:
+            pos = self._client.get_open_position(symbol)
+        except Exception:
+            # Posicion no existe o ya fue cerrada
+            logger.info(f"[{symbol}] Posicion no encontrada en Alpaca (cerrada o inexistente).")
+            return 0.0
 
-        # Reusar credenciales del trading client no es directo;
-        # se usa get_all_positions para obtener el precio actual de la posicion
-        positions = self._client.get_all_positions()
-        for pos in positions:
-            if pos.symbol == symbol:
-                current_price = float(pos.current_price)
-                logger.debug(f"[{symbol}] Precio actual: ${current_price:.2f}")
-                return current_price
+        # 2. Consultar precio en tiempo real del mercado (latest trade)
+        try:
+            req = StockLatestTradeRequest(symbol_or_symbols=symbol)
+            res = self._data_client.get_stock_latest_trade(req)
+            if symbol in res and res[symbol].price > 0:
+                price = float(res[symbol].price)
+                logger.debug(f"[{symbol}] Precio tiempo real (latest trade): ${price:.2f}")
+                return price
+        except Exception as exc:
+            logger.warning(
+                f"[{symbol}] Error consultando latest trade: {exc}. Usando fallback de posicion."
+            )
 
-        # Si no hay posicion abierta, retornar 0 (posicion ya cerrada)
-        logger.warning(
-            f"[{symbol}] No se encontro posicion abierta al consultar precio."
-        )
-        return 0.0
+        # 3. Fallback: precio registrado en el objeto Position
+        return float(pos.current_price) if pos and pos.current_price else 0.0
 
     def close_all(self) -> None:
         """

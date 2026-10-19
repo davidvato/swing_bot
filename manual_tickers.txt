@@ -4,3 +4,7 @@
 # Ejemplo:
 # MELI
 # ROKU
+
+KOF
+DXC
+ACN

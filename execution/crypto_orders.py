@@ -30,6 +30,8 @@ from alpaca.trading.requests import (
     StopLossRequest,
 )
 from alpaca.trading.enums import OrderSide, TimeInForce
+from alpaca.data.historical import CryptoHistoricalDataClient
+from alpaca.data.requests import CryptoLatestTradeRequest
 
 from config import (
     CRYPTO_MAX_POSITION_PCT,
@@ -51,14 +53,15 @@ class CryptoOrderManager:
 
     def __init__(self, api_key: str, secret_key: str) -> None:
         """
-        Inicializa el gestor de ordenes cripto.
+        Inicializa el gestor de ordenes cripto y cliente de datos en tiempo real.
 
         Args:
             api_key: Clave publica de Alpaca.
             secret_key: Clave secreta de Alpaca.
         """
         self._client = TradingClient(api_key=api_key, secret_key=secret_key, paper=True)
-        logger.info("CryptoOrderManager inicializado (paper=True).")
+        self._data_client = CryptoHistoricalDataClient(api_key=api_key, secret_key=secret_key)
+        logger.info("CryptoOrderManager inicializado (paper=True) con feeds cripto en tiempo real.")
 
     def get_account_equity(self) -> float:
         """Retorna el equity total de la cuenta Alpaca (compartido con equities)."""
@@ -197,19 +200,37 @@ class CryptoOrderManager:
 
     def get_latest_quote(self, symbol: str) -> float:
         """
-        Obtiene el precio de cierre mas reciente de un par cripto
-        usando las posiciones abiertas en Alpaca.
+        Obtiene el precio mas reciente en tiempo real de un par cripto
+        usando CryptoHistoricalDataClient (latest trade).
+        Verifica previamente si la posicion sigue abierta en Alpaca.
 
         Args:
             symbol: Par cripto Alpaca (ej. 'BTC/USD').
 
         Returns:
-            Precio actual del activo, o 0.0 si no hay posicion o falla.
+            Precio actual del activo, o 0.0 si no hay posicion o ya fue cerrada.
         """
+        alpaca_symbol = symbol.replace("/", "")
+        position = None
         try:
-            alpaca_symbol = symbol.replace("/", "")
             position = self._client.get_open_position(alpaca_symbol)
-            return float(position.current_price)
+        except Exception:
+            return 0.0
+
+        # Consultar precio tiempo real
+        try:
+            req = CryptoLatestTradeRequest(symbol_or_symbols=symbol)
+            res = self._data_client.get_crypto_latest_trade(req)
+            if symbol in res and res[symbol].price > 0:
+                price = float(res[symbol].price)
+                logger.debug(f"[CRYPTO {symbol}] Precio tiempo real (latest trade): ${price:.4f}")
+                return price
+        except Exception as exc:
+            logger.warning(f"[CRYPTO {symbol}] Error consultando latest trade: {exc}")
+
+        # Fallback de posicion
+        try:
+            return float(position.current_price) if position else 0.0
         except Exception:
             return 0.0
 

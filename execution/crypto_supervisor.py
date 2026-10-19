@@ -206,15 +206,22 @@ class CryptoPositionSupervisor:
                 )
 
                 # get_latest_quote retorna 0.0 si la posicion ya no existe
+                # Re-confirmar para descartar fallos temporales de red
                 if current_price == 0.0:
-                    logger.info(
-                        f"[CRYPTO {symbol}] Posicion cerrada por Alpaca "
-                        f"(TP o SL ejecutado automaticamente). "
-                        f"Recuperando precio de salida..."
+                    await asyncio.sleep(2)
+                    recheck_price = await asyncio.get_event_loop().run_in_executor(
+                        None, self._order_manager.get_latest_quote, symbol
                     )
-                    exit_price, exit_type = await self._get_broker_exit_info(record)
-                    await self._log_exit(record, exit_price, exit_type)
-                    break
+                    if recheck_price == 0.0:
+                        logger.info(
+                            f"[CRYPTO {symbol}] Posicion confirmada cerrada por Alpaca "
+                            f"(TP o SL ejecutado automaticamente). "
+                            f"Recuperando precio de salida..."
+                        )
+                        exit_price, exit_type = await self._get_broker_exit_info(record)
+                        await self._log_exit(record, exit_price, exit_type)
+                        break
+                    current_price = recheck_price
 
                 logger.debug(
                     f"[CRYPTO {symbol}] Posicion activa: precio=${current_price:.4f} | "

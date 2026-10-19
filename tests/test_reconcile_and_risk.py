@@ -115,3 +115,28 @@ def test_reconciler_idempotent_sqlite():
         row = cur.fetchone()
         assert row is not None
         assert row[0] == 200.0  # (220 - 200) * 10
+
+
+def test_crypto_get_latest_quote_realtime():
+    """CryptoOrderManager.get_latest_quote debe retornar el precio de CryptoLatestTradeRequest."""
+    mgr = CryptoOrderManager("dummy_key", "dummy_secret")
+    mock_pos = MagicMock()
+    mock_pos.current_price = "80000.00"
+    mgr._client.get_open_position = MagicMock(return_value=mock_pos)
+
+    mock_trade = MagicMock()
+    mock_trade.price = 81500.25
+    mgr._data_client.get_crypto_latest_trade = MagicMock(return_value={"BTC/USD": mock_trade})
+
+    price = mgr.get_latest_quote("BTC/USD")
+    assert price == 81500.25
+
+
+def test_crypto_get_latest_quote_closed_position():
+    """Si la posicion no existe en Alpaca, get_latest_quote debe retornar 0.0."""
+    mgr = CryptoOrderManager("dummy_key", "dummy_secret")
+    mgr._client.get_open_position = MagicMock(side_effect=Exception("Not found"))
+
+    price = mgr.get_latest_quote("BTC/USD")
+    assert price == 0.0
+

@@ -97,7 +97,7 @@ TIMEZONE_EST: str = "America/New_York"  # Zona horaria de referencia
 API_RATE_LIMIT_RPM: int = 200           # Limite maximo de requests por minuto
 REQUEST_INTERVAL_SEC: float = 0.35      # Pausa minima entre requests (segundos)
 MAX_RETRY_ATTEMPTS: int = 3             # Reintentos maximos ante HTTP 429
-SUPERVISOR_POLL_INTERVAL_SEC: int = 60  # Intervalo de monitoreo TP/SL (segundos)
+SUPERVISOR_POLL_INTERVAL_SEC: int = 15  # Intervalo de monitoreo TP/SL en tiempo real (15 segundos)
 
 # ─── Almacenamiento de Datos ──────────────────────────────────────────────────
 DB_PATH: str = "trades.db"              # Ruta de la base de datos SQLite
@@ -162,7 +162,7 @@ CRYPTO_STOP_LOSS_PCT: float = 0.05
 CRYPTO_MAX_HOLD_HOURS: int = 72      # Maximo de holding en horas (cripto no cierra)
 CRYPTO_MAX_POSITION_PCT: float = 0.05  # 5% del equity por posicion (conservador individual)
 CRYPTO_MAX_PORTFOLIO_HEAT: float = 0.20 # Limite maximo global de capital en cripto (ej. 20% = 4 posiciones vivas)
-CRYPTO_POLL_INTERVAL_SEC: int = 300  # Supervisor revisa cada 5 min (24/7)
+CRYPTO_POLL_INTERVAL_SEC: int = 30  # Supervisor revisa cada 30 segundos (24/7)
 
 # Criterio de Kelly aislado para Cripto (R:R asimetrico 1.5 a 1)
 CRYPTO_KELLY_WIN_RATE: float = 0.42      # Base historica de la senal Momentum

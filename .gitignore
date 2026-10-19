@@ -36,3 +36,6 @@ htmlcov/
 # El directorio models/ se trackea; ignorar solo archivos temporales de entrenamiento.
 ml/models/*.tmp
 ml/models/*.bak
+
+# ─── Scratch scripts ──────────────────────────────────────────────────────────
+scratch/

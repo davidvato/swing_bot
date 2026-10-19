@@ -221,13 +221,21 @@ class PositionSupervisor:
                     symbol,
                 )
 
-                # Si precio = 0, la posicion ya fue cerrada externamente
+                # Si precio = 0, re-confirmar para descartar fallo transitorio de red
                 if current_price == 0.0:
-                    logger.info(
-                        f"[{symbol}] Posicion ya cerrada externamente. "
-                        "Terminando supervision."
+                    await asyncio.sleep(2)
+                    recheck_price = await asyncio.get_event_loop().run_in_executor(
+                        None,
+                        self._order_manager.get_latest_quote,
+                        symbol,
                     )
-                    break
+                    if recheck_price == 0.0:
+                        logger.info(
+                            f"[{symbol}] Posicion confirmada cerrada externamente. "
+                            "Terminando supervision."
+                        )
+                        break
+                    current_price = recheck_price
                     
                 # Actualizar trailing SL
                 if current_price > record.highest_price:

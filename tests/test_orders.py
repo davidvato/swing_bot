@@ -215,3 +215,53 @@ class TestOrderMutualExclusivity:
         assert order.side == OrderSide.BUY
         assert order.time_in_force == TimeInForce.DAY
         assert order.qty is None, "CRITICO: qty debe ser None en orden notional"
+
+
+class TestOrderManagerGetLatestQuote:
+    """Pruebas unitarias para la logica de cotizacion en tiempo real de OrderManager."""
+
+    def test_get_latest_quote_returns_realtime_trade_price(self):
+        """get_latest_quote debe retornar el precio de StockLatestTradeRequest si la posicion esta abierta."""
+        from unittest.mock import MagicMock
+        from execution.orders import OrderManager
+
+        mgr = OrderManager("dummy_key", "dummy_secret")
+        # Mock open position
+        mock_pos = MagicMock()
+        mock_pos.current_price = "200.00"
+        mgr._client.get_open_position = MagicMock(return_value=mock_pos)
+
+        # Mock latest trade
+        mock_trade = MagicMock()
+        mock_trade.price = 215.50
+        mgr._data_client.get_stock_latest_trade = MagicMock(return_value={"NVDA": mock_trade})
+
+        price = mgr.get_latest_quote("NVDA")
+        assert price == 215.50
+
+    def test_get_latest_quote_falls_back_to_pos_price_on_data_error(self):
+        """Si el endpoint de market data falla, debe usar pos.current_price como fallback."""
+        from unittest.mock import MagicMock
+        from execution.orders import OrderManager
+
+        mgr = OrderManager("dummy_key", "dummy_secret")
+        mock_pos = MagicMock()
+        mock_pos.current_price = "210.25"
+        mgr._client.get_open_position = MagicMock(return_value=mock_pos)
+
+        # Simulamos error de red en DataClient
+        mgr._data_client.get_stock_latest_trade = MagicMock(side_effect=Exception("Timeout"))
+
+        price = mgr.get_latest_quote("NVDA")
+        assert price == 210.25
+
+    def test_get_latest_quote_returns_zero_when_position_closed(self):
+        """Si la posicion no existe en Alpaca (cerrada), debe retornar 0.0."""
+        from unittest.mock import MagicMock
+        from execution.orders import OrderManager
+
+        mgr = OrderManager("dummy_key", "dummy_secret")
+        mgr._client.get_open_position = MagicMock(side_effect=Exception("position does not exist"))
+
+        price = mgr.get_latest_quote("AAPL")
+        assert price == 0.0
