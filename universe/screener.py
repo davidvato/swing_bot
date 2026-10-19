@@ -29,6 +29,7 @@ from config import (
     REQUEST_INTERVAL_SEC,
     MAX_RETRY_ATTEMPTS,
     UNIVERSE_SIZE,
+    UNIVERSE_MAX_PER_SECTOR,
     UNIVERSE_MIN_PRICE,
     UNIVERSE_MIN_AVG_VOLUME,
     UNIVERSE_LOOKBACK_DAYS,
@@ -128,6 +129,44 @@ SP500_CANDIDATE_POOL: list[str] = [
     "VZ",    # Verizon Communications
     "TMUS",  # T-Mobile US Inc.
 ]
+
+# ─── Mapeo de Sectores para Diversificación Cuantitativa ───────────────────────
+# Previene la sobreconcentracion en un solo sector (e.g. Big Tech / Semis).
+SECTOR_MAP: dict[str, str] = {
+    # ── Tecnologia (Semiconductores, Software Empresarial, Hardware) ───────────
+    "AAPL": "Tecnologia", "MSFT": "Tecnologia", "NVDA": "Tecnologia",
+    "AVGO": "Tecnologia", "AMD": "Tecnologia", "PLTR": "Tecnologia",
+    "ORCL": "Tecnologia", "CRM": "Tecnologia", "ADBE": "Tecnologia",
+    "INTC": "Tecnologia", "QCOM": "Tecnologia", "TXN": "Tecnologia",
+    "AMAT": "Tecnologia", "MU": "Tecnologia", "LRCX": "Tecnologia",
+    "KLAC": "Tecnologia", "NOW": "Tecnologia", "SNOW": "Tecnologia",
+    "PANW": "Tecnologia", "CRWD": "Tecnologia", "FTNT": "Tecnologia",
+    "DELL": "Tecnologia", "HPQ": "Tecnologia", "IBM": "Tecnologia",
+    # ── Comunicaciones y Medios ───────────────────────────────────────────────
+    "GOOG": "Comunicaciones", "GOOGL": "Comunicaciones", "META": "Comunicaciones",
+    "NFLX": "Comunicaciones", "DIS": "Comunicaciones", "CMCSA": "Comunicaciones",
+    "T": "Comunicaciones", "VZ": "Comunicaciones", "TMUS": "Comunicaciones",
+    # ── Consumo Discrecional y Esencial ───────────────────────────────────────
+    "AMZN": "Consumo", "TSLA": "Consumo", "HD": "Consumo",
+    "WMT": "Consumo", "COST": "Consumo", "TGT": "Consumo",
+    "NKE": "Consumo", "MCD": "Consumo", "SBUX": "Consumo",
+    "PG": "Consumo", "KO": "Consumo", "PEP": "Consumo",
+    # ── Finanzas ──────────────────────────────────────────────────────────────
+    "JPM": "Finanzas", "BAC": "Finanzas", "WFC": "Finanzas",
+    "GS": "Finanzas", "MS": "Finanzas", "BLK": "Finanzas",
+    "AXP": "Finanzas", "V": "Finanzas", "MA": "Finanzas",
+    "PYPL": "Finanzas", "C": "Finanzas", "USB": "Finanzas",
+    # ── Salud ─────────────────────────────────────────────────────────────────
+    "UNH": "Salud", "JNJ": "Salud", "PFE": "Salud",
+    "MRK": "Salud", "ABBV": "Salud", "LLY": "Salud",
+    "BMY": "Salud", "AMGN": "Salud", "GILD": "Salud",
+    "CVS": "Salud", "CI": "Salud",
+    # ── Industriales y Energia ────────────────────────────────────────────────
+    "BA": "Industriales/Energia", "CAT": "Industriales/Energia", "GE": "Industriales/Energia",
+    "HON": "Industriales/Energia", "LMT": "Industriales/Energia", "RTX": "Industriales/Energia",
+    "UPS": "Industriales/Energia", "XOM": "Industriales/Energia", "CVX": "Industriales/Energia",
+    "COP": "Industriales/Energia",
+}
 
 
 class UniverseScreener:
@@ -294,9 +333,14 @@ class UniverseScreener:
 
     # ─── Logica de Seleccion ──────────────────────────────────────────────────
 
-    def select_universe(self, n: int = UNIVERSE_SIZE) -> list[str]:
+    def select_universe(
+        self,
+        n: int = UNIVERSE_SIZE,
+        max_per_sector: int = UNIVERSE_MAX_PER_SECTOR,
+    ) -> list[str]:
         """
-        Ejecuta el screener y retorna el Top-N de tickers por liquidez.
+        Ejecuta el screener y retorna el Top-N de tickers por liquidez con
+        diversificacion sectorial automatica.
 
         Secuencia:
           1. Descargar UNIVERSE_LOOKBACK_DAYS de barras para el pool.
@@ -304,10 +348,13 @@ class UniverseScreener:
           3. Filtrar: price >= UNIVERSE_MIN_PRICE y volume >= UNIVERSE_MIN_AVG_VOLUME.
           4. Calcular liquidity_score = last_price * avg_volume.
           5. Ordenar descendente por liquidity_score.
-          6. Retornar Top-N simbolos.
+          6. Seleccionar Top-N aplicando el limite max_per_sector para evitar
+             sobreconcentracion en un solo sector (e.g. max 4 de Tecnologia).
+          7. Retornar simbolos seleccionados.
 
         Args:
             n: Numero de tickers a seleccionar (default: UNIVERSE_SIZE).
+            max_per_sector: Maximo de tickers permitidos por sector (default: UNIVERSE_MAX_PER_SECTOR).
 
         Returns:
             Lista de tickers seleccionados ordenada por score descendente.
@@ -315,7 +362,8 @@ class UniverseScreener:
         """
         logger.info(
             f"[Screener] Iniciando seleccion de universo. "
-            f"Pool: {len(SP500_CANDIDATE_POOL)} candidatos → Top-{n}"
+            f"Pool: {len(SP500_CANDIDATE_POOL)} candidatos → Top-{n} "
+            f"(max {max_per_sector}/sector)"
         )
 
         try:
@@ -365,12 +413,43 @@ class UniverseScreener:
                     "Criterios demasiado restrictivos."
                 )
 
-            # ── Paso 4: Ranking y seleccion Top-N ────────────────────────────
+            # ── Paso 4: Ranking y seleccion con Diversificacion Sectorial ────
             metrics_df = metrics_df.sort_values("liquidity_score", ascending=False)
-            top_n = metrics_df.head(n)
 
-            selected = top_n["ticker"].tolist()
-            scores = dict(zip(top_n["ticker"], top_n["liquidity_score"].round(2)))
+            selected: list[str] = []
+            sector_counts: dict[str, int] = {}
+            scores: dict[str, float] = {}
+
+            # Primera pasada: seleccionar los mas liquidos respetando max_per_sector
+            for _, row in metrics_df.iterrows():
+                t = str(row["ticker"])
+                sec = SECTOR_MAP.get(t, "Otros")
+                cnt = sector_counts.get(sec, 0)
+
+                if cnt >= max_per_sector:
+                    logger.debug(
+                        f"[Screener] Omitiendo {t} ({sec}): limite sectorial alcanzado ({max_per_sector})."
+                    )
+                    continue
+
+                selected.append(t)
+                sector_counts[sec] = cnt + 1
+                scores[t] = round(float(row["liquidity_score"]), 2)
+
+                if len(selected) >= n:
+                    break
+
+            # Segunda pasada de relleno si los limites sectoriales impidieron llegar a n
+            if len(selected) < n:
+                for _, row in metrics_df.iterrows():
+                    t = str(row["ticker"])
+                    if t not in selected:
+                        selected.append(t)
+                        sec = SECTOR_MAP.get(t, "Otros")
+                        sector_counts[sec] = sector_counts.get(sec, 0) + 1
+                        scores[t] = round(float(row["liquidity_score"]), 2)
+                        if len(selected) >= n:
+                            break
 
             # ── Paso 5: Actualizar estado y persistir ─────────────────────────
             self._active_universe = selected
@@ -379,13 +458,15 @@ class UniverseScreener:
             self._save_cache()
 
             logger.info(
-                f"[Screener] Universo actualizado exitosamente: {selected}"
+                f"[Screener] Universo actualizado exitosamente ({len(selected)} tickers, "
+                f"sectores: {sector_counts}): {selected}"
             )
             for ticker in selected:
                 score = scores.get(ticker, 0)
+                sec = SECTOR_MAP.get(ticker, "Otros")
                 row = metrics_df[metrics_df["ticker"] == ticker].iloc[0]
                 logger.info(
-                    f"  {ticker}: precio=${row['last_price']:.2f} | "
+                    f"  {ticker} ({sec}): precio=${row['last_price']:.2f} | "
                     f"vol_avg={row['avg_volume']:,.0f} | "
                     f"score={score:,.0f}"
                 )
@@ -446,6 +527,7 @@ class UniverseScreener:
         if not self._active_universe:
             return {
                 "active_universe": list(FALLBACK_TICKERS),
+                "sectors": {sym: SECTOR_MAP.get(sym, "Otros") for sym in FALLBACK_TICKERS},
                 "scores": {},
                 "last_updated": None,
                 "source": "static_fallback",
@@ -455,6 +537,7 @@ class UniverseScreener:
 
         return {
             "active_universe": self._active_universe,
+            "sectors": {sym: SECTOR_MAP.get(sym, "Otros") for sym in self._active_universe},
             "scores": self._scores,
             "last_updated": (
                 self._last_updated.isoformat() if self._last_updated else None

@@ -16,20 +16,21 @@ TEST_BUDGET_USD: float = 200.0     # Capital simulado total disponible
 # por universe/screener.py (UniverseScreener). Solo se usa esta lista
 # si el screener falla O si no existe cache previo al arrancar el bot.
 TICKERS: list[str] = [
-    "AAPL",   # Apple Inc.
-    "MSFT",   # Microsoft Corporation
-    "NVDA",   # NVIDIA Corporation
-    "GOOG",   # Alphabet Inc.
-    "META",   # Meta Platforms Inc.
-    "AMZN",   # Amazon.com Inc.
-    "TSLA",   # Tesla Inc.
-    "AVGO",   # Broadcom Inc.
-    "PLTR",   # Palantir Technologies
-    "AMD",    # Advanced Micro Devices
+    "AAPL",   # Apple Inc. (Tecnología)
+    "NVDA",   # NVIDIA Corporation (Semiconductores)
+    "AMZN",   # Amazon.com Inc. (Consumo / Cloud)
+    "META",   # Meta Platforms Inc. (Tecnología / Redes)
+    "GOOG",   # Alphabet Inc. (Tecnología / Búsqueda)
+    "TSLA",   # Tesla Inc. (Automotriz / Tecnología)
+    "AVGO",   # Broadcom Inc. (Semiconductores)
+    "LLY",    # Eli Lilly and Company (Salud / Farmacéutica)
+    "JPM",    # JPMorgan Chase & Co. (Finanzas)
+    "NFLX",   # Netflix Inc. (Comunicaciones / Streaming)
 ]
 
 # ─── Seleccion Dinamica de Universo (Universe Screener) ───────────────────────
 UNIVERSE_SIZE: int = 10               # Numero de tickers a seleccionar (Top-N)
+UNIVERSE_MAX_PER_SECTOR: int = 4      # Maximo de tickers por sector en universo dinamico (diversificacion)
 UNIVERSE_MIN_PRICE: float = 10.0      # Precio minimo de cierre ($) para filtrar
 UNIVERSE_MIN_AVG_VOLUME: int = 5_000_000  # Volumen promedio minimo (30d) por dia
 UNIVERSE_LOOKBACK_DAYS: int = 30      # Dias de historico para calcular metricas

@@ -33,8 +33,8 @@ cls
 echo.
 echo  ===================================================
 echo   SWING TRADING BOT - ALPACA PAPER TRADING
-echo   Tickers: AAPL MSFT NVDA GOOG META AMZN TSLA
-echo            AVGO PLTR AMD
+echo   Tickers: AAPL NVDA AMZN META GOOG TSLA AVGO
+echo            LLY JPM NFLX
 echo   Estrategia: Mean Reversion  SMA-200 / RSI-4
 echo   Riesgo    : Half-Kelly  (max 15%% por operacion)
 echo   Cierre    : Viernes 15:45 EST
