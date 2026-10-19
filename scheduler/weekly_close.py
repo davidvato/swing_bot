@@ -31,6 +31,7 @@ from config import (
     MARKET_CLOSE_TIME_EST,
     TRADE_TYPE_SELL_EOW,
     UNIVERSE_UPDATE_TIME_EST,
+    EOW_HOLD_IF_PROFITABLE,
 )
 
 logger = logging.getLogger(__name__)
@@ -231,8 +232,30 @@ def friday_liquidation() -> None:
     # NOTA: NO se usa close_all_positions() porque cierra TODAS las posiciones
     # en Alpaca, incluyendo cripto. Iteramos y vendemos solo las posiciones
     # de equity filtradas en el Paso 1 para no tocar cripto.
-    if open_positions:
-        for pos in open_positions:
+    # EOW Inteligente: Si EOW_HOLD_IF_PROFITABLE=True, solo se liquidan las
+    # posiciones que esten EN PERDIDA. Las ganadoras se mantienen activas bajo
+    # el limite MAX_HOLD_DAYS del supervisor (hasta 5 dias calendario).
+    # Esto elimina la principal fuga de alpha detectada en el backtesting.
+    if EOW_HOLD_IF_PROFITABLE:
+        positions_to_close = [p for p in open_positions if float(p.unrealized_pl) < 0]
+        positions_to_hold = [p for p in open_positions if float(p.unrealized_pl) >= 0]
+        if positions_to_hold:
+            logger.info(
+                f"EOW INTELIGENTE: Manteniendo {len(positions_to_hold)} posicion(es) "
+                f"con ganancia durante el fin de semana: "
+                f"{[p.symbol for p in positions_to_hold]}"
+            )
+        logger.info(
+            f"EOW INTELIGENTE: Liquidando {len(positions_to_close)} posicion(es) "
+            f"en perdida: {[p.symbol for p in positions_to_close]}"
+        )
+    else:
+        # Comportamiento original: liquidar todo sin condicion
+        positions_to_close = open_positions
+        positions_to_hold = []
+
+    if positions_to_close:
+        for pos in positions_to_close:
             try:
                 _order_manager.submit_sell(pos.symbol, float(pos.qty))
                 logger.info(f"  Sell a mercado enviado: {pos.symbol} qty={pos.qty}")
@@ -242,11 +265,12 @@ def friday_liquidation() -> None:
                     "Verificar cuenta en Alpaca Dashboard."
                 )
     else:
-        logger.info("Sin posiciones de equity abiertas para liquidar este viernes.")
+        logger.info("Sin posiciones de equity a liquidar segun politica EOW activa.")
+
 
     # \u2500\u2500\u2500 Paso 4: Registrar cada cierre en el trade log \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
     if _trade_logger is not None:
-        for pos in open_positions:
+        for pos in positions_to_close:
             try:
                 symbol = pos.symbol
                 entry_price = float(pos.avg_entry_price)
@@ -274,8 +298,11 @@ def friday_liquidation() -> None:
                     f"Error registrando cierre de {pos.symbol} en trade log: {exc}"
                 )
 
+    held_count = len(open_positions) - len(positions_to_close)
     logger.warning(
-        f"LIQUIDACION SEMANAL DE EQUITIES COMPLETADA \u2014 {len(open_positions)} posiciones cerradas. "
+        f"LIQUIDACION SEMANAL DE EQUITIES COMPLETADA — "
+        f"{len(positions_to_close)} posicion(es) cerradas | "
+        f"{held_count} mantenidas (EOW inteligente). "
         "Las posiciones cripto siguen activas bajo su supervisor 24/7."
     )
 

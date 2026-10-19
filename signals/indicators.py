@@ -28,6 +28,8 @@ from config import (
     CRYPTO_EMA_SLOW,
     CRYPTO_RSI_PERIOD,
     CRYPTO_RSI_MOMENTUM_MIN,
+    MAX_RELATIVE_ATR,
+    ATR_FILTER_PERIOD,
 )
 
 logger = logging.getLogger(__name__)
@@ -36,6 +38,9 @@ logger = logging.getLogger(__name__)
 COL_SMA = f"SMA_{SMA_PERIOD}"
 COL_RSI = f"RSI_{RSI_PERIOD}"
 COL_CONSEC_DOWN = "CONSEC_DOWN"
+COL_ATR = f"ATR_{ATR_FILTER_PERIOD}"   # Average True Range para filtro de volatilidad
+COL_REL_ATR = "REL_ATR"                # ATR relativo (ATR / Close) = % de rango diario
+
 
 
 def _compute_sma(series: pd.Series, period: int) -> pd.Series:
@@ -136,10 +141,29 @@ def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
         consec_down_values.append(check_consecutive_down(sub_df, CONSEC_DOWN_DAYS))
     df[COL_CONSEC_DOWN] = consec_down_values
 
+    # ─── ATR-14 (Average True Range) para filtro de volatilidad relativa ──────
+    # Requiere columnas high, low, close. Si no existen, se omite el calculo.
+    if all(c in df.columns for c in ["high", "low", "close"]):
+        high = df["high"]
+        low = df["low"]
+        close_series = df["close"]
+        prev_close = close_series.shift(1)
+        tr = pd.concat([
+            high - low,
+            (high - prev_close).abs(),
+            (low - prev_close).abs(),
+        ], axis=1).max(axis=1)
+        df[COL_ATR] = tr.ewm(com=ATR_FILTER_PERIOD - 1, min_periods=ATR_FILTER_PERIOD).mean()
+        df[COL_REL_ATR] = df[COL_ATR] / df["close"].replace(0, float("nan"))
+    else:
+        df[COL_ATR] = float("nan")
+        df[COL_REL_ATR] = float("nan")
+
     logger.debug(
         f"Indicadores calculados: SMA={df[COL_SMA].iloc[-1]:.2f}, "
         f"RSI={df[COL_RSI].iloc[-1]:.2f}, "
-        f"ConsecDown={df[COL_CONSEC_DOWN].iloc[-1]}"
+        f"ConsecDown={df[COL_CONSEC_DOWN].iloc[-1]}, "
+        f"RelATR={df[COL_REL_ATR].iloc[-1] if COL_REL_ATR in df.columns else 'N/A'}"
         if not df.empty else "DataFrame vacio."
     )
 
@@ -154,6 +178,8 @@ def generate_signal(df: pd.DataFrame) -> bool:
         SEÑAL = (close_actual > SMA_200_actual)
                 AND
                 (RSI_4_actual < RSI_OVERSOLD OR CONSEC_DOWN == True)
+                AND
+                (REL_ATR <= MAX_RELATIVE_ATR)  # Filtro de volatilidad relativa
 
     Args:
         df: DataFrame con indicadores ya calculados (output de compute_indicators).
@@ -190,6 +216,20 @@ def generate_signal(df: pd.DataFrame) -> bool:
             f"Indicadores con NaN (datos insuficientes para SMA-{SMA_PERIOD}). Sin señal."
         )
         return False
+
+    # ─── Filtro de Volatilidad Relativa (ATR/Close) ────────────────────────────
+    # Rechaza la señal si la volatilidad relativa del activo es demasiado alta.
+    # Activos como PLTR en fases erraticas tienen ATR/Close > 4%, lo que
+    # destruye la tesis de mean-reversion de corto plazo con RSI-4.
+    if MAX_RELATIVE_ATR is not None and COL_REL_ATR in df.columns:
+        rel_atr = last.get(COL_REL_ATR, float("nan"))
+        if not math.isnan(rel_atr) and rel_atr > MAX_RELATIVE_ATR:
+            logger.info(
+                f"SEÑAL BLOQUEADA por filtro de volatilidad: "
+                f"ATR/Close={rel_atr*100:.2f}% > maximo={MAX_RELATIVE_ATR*100:.1f}%. "
+                f"Activo demasiado volatil para mean-reversion de corto plazo."
+            )
+            return False
 
     # Condicion 1: Precio sobre la SMA-200 (filtro de tendencia alcista)
     above_sma = close > sma_200

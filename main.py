@@ -445,8 +445,8 @@ async def run_daily_signals(
         # Cantidad estimada de acciones = notional dinámico / precio_entrada
         estimated_qty = dynamic_notional / entry_price if entry_price > 0 else 0.0
 
-        # Registrar compra en el trade log
-        trade_logger.log_entry({
+        # Registrar compra en el trade log y capturar el ID del BUY
+        buy_trade_id = trade_logger.log_entry({
             "ticker": ticker,
             "notional": dynamic_notional,
             "entry_price": entry_price,
@@ -454,13 +454,14 @@ async def run_daily_signals(
             "kelly_pct": kelly_applied,
         })
 
-        # Registrar posicion para supervision TP/SL
+        # Registrar posicion para supervision TP/SL (con ID del BUY para round-trip)
         supervisor.add_position(
             symbol=ticker,
             entry_price=entry_price,
             qty=estimated_qty,
             notional=dynamic_notional,
             kelly_pct=kelly_applied,
+            entry_trade_id=buy_trade_id,
         )
 
         orders_placed += 1

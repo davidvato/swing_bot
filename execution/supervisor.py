@@ -41,6 +41,7 @@ from config import (
     TIMEZONE_EST,
     SL_GRACE_PERIOD_MINS,
     MARKET_OPEN_TIME_EST,
+    BREAKEVEN_TRIGGER_PCT,
 )
 
 logger = logging.getLogger(__name__)
@@ -60,7 +61,9 @@ class PositionRecord:
         entry_date: Fecha de entrada al mercado (para limite de 5 dias).
         notional: Importe invertido originalmente en USD.
         kelly_pct: Fraccion de Kelly aplicada al momento de la compra.
+        entry_trade_id: ID de la fila BUY en SQLite para vincular round-trip.
         task: Referencia a la tarea asyncio para cancelacion (no serializable).
+        breakeven_activated: True cuando el SL fue movido a precio de entrada.
     """
     symbol: str
     entry_price: float
@@ -68,11 +71,15 @@ class PositionRecord:
     entry_date: date
     notional: float
     kelly_pct: float
+    entry_trade_id: Optional[int] = field(default=None)  # ID del BUY en SQLite
     task: Optional[asyncio.Task] = field(default=None, repr=False)
     highest_price: float = field(init=False)
+    breakeven_activated: bool = field(default=False)     # Break-Even Stop activado
+    _sl_floor: float = field(default=0.0, init=False)    # Floor del SL tras break-even
 
     def __post_init__(self):
         self.highest_price = self.entry_price
+        self._sl_floor = 0.0  # Sin floor hasta que se active break-even
 
     @property
     def target_tp(self) -> float:
@@ -81,13 +88,34 @@ class PositionRecord:
 
     @property
     def target_sl(self) -> float:
-        """Precio objetivo de Stop-Loss dinámico (-STOP_LOSS_PCT% desde el máximo)."""
-        return self.highest_price * (1.0 - STOP_LOSS_PCT)
+        """Precio objetivo de Stop-Loss dinamico.
+        
+        - Si break-even esta activado: SL = max(trailing_sl, entry_price).
+          Garantiza que nunca cerremos debajo del precio de entrada una vez
+          que el break-even fue activado.
+        - Si break-even NO esta activado: SL = highest_price * (1 - STOP_LOSS_PCT)
+          (trailing stop clasico desde el maximo).
+        """
+        trailing_sl = self.highest_price * (1.0 - STOP_LOSS_PCT)
+        if self.breakeven_activated:
+            return max(trailing_sl, self._sl_floor)
+        return trailing_sl
 
     @property
     def days_held(self) -> int:
         """Dias calendario transcurridos desde la entrada."""
         return (date.today() - self.entry_date).days
+
+    def activate_breakeven(self) -> None:
+        """Mueve el floor del SL a precio de entrada (protege capital)."""
+        if not self.breakeven_activated:
+            self._sl_floor = self.entry_price
+            self.breakeven_activated = True
+            logger.info(
+                f"[{self.symbol}] BREAK-EVEN STOP ACTIVADO: SL floor = ${self._sl_floor:.2f} "
+                f"(entry_price). El trade no puede cerrar en rojo."
+            )
+
 
 
 class PositionSupervisor:
@@ -121,6 +149,7 @@ class PositionSupervisor:
         notional: float,
         kelly_pct: float,
         entry_date: Optional[date] = None,
+        entry_trade_id: Optional[int] = None,
     ) -> PositionRecord:
         """
         Registra una nueva posicion para supervision y lanza su corutina.
@@ -132,6 +161,7 @@ class PositionSupervisor:
             notional: Importe invertido en USD.
             kelly_pct: Fraccion Kelly aplicada.
             entry_date: Fecha de entrada (default: hoy).
+            entry_trade_id: ID del BUY en SQLite para vincular round-trip.
 
         Returns:
             PositionRecord recien creado y registrado.
@@ -146,14 +176,17 @@ class PositionSupervisor:
             entry_date=entry_date,
             notional=notional,
             kelly_pct=kelly_pct,
+            entry_trade_id=entry_trade_id,
         )
         self._positions[symbol] = record
         logger.info(
             f"[{symbol}] Posicion registrada: "
             f"entry=${entry_price:.2f}, qty={qty:.6f}, "
             f"TP=${record.target_tp:.2f}, SL=${record.target_sl:.2f}"
+            + (f", BUY_ID={entry_trade_id}" if entry_trade_id else "")
         )
         return record
+
 
     async def _supervise_position(self, record: PositionRecord) -> None:
         """
@@ -199,6 +232,13 @@ class PositionSupervisor:
                 # Actualizar trailing SL
                 if current_price > record.highest_price:
                     record.highest_price = current_price
+
+                # ─── Evaluar activacion de Break-Even Stop ────────────────────────
+                # Si el activo subió BREAKEVEN_TRIGGER_PCT desde entrada,
+                # activar break-even: el SL floor se mueve a entry_price.
+                gain_pct = (current_price - record.entry_price) / record.entry_price
+                if not record.breakeven_activated and gain_pct >= BREAKEVEN_TRIGGER_PCT:
+                    record.activate_breakeven()
 
                 days_held = record.days_held
                 logger.debug(
@@ -300,7 +340,7 @@ class PositionSupervisor:
             pnl = (exit_price - record.entry_price) * record.qty
             pnl_pct = (exit_price - record.entry_price) / record.entry_price
 
-            # Registrar en el trade log
+            # Registrar en el trade log (con entry_trade_id para vincular round-trip)
             trade_data = {
                 "ticker": symbol,
                 "trade_type": exit_type,
@@ -312,6 +352,7 @@ class PositionSupervisor:
                 "pnl_pct": round(pnl_pct, 6),
                 "kelly_pct": record.kelly_pct,
                 "entry_time": record.entry_date.strftime("%Y-%m-%d") if record.entry_date else "N/A",
+                "entry_trade_id": record.entry_trade_id,  # ID del BUY padre (trazabilidad)
             }
             self._trade_logger.log_exit(trade_data)
 

@@ -49,8 +49,11 @@ RSI_OVERSOLD: float = 30.0      # Umbral RSI para condicion de sobreventa
 CONSEC_DOWN_DAYS: int = 4       # Dias consecutivos a la baja (señal alternativa)
 
 # ─── Criterio de Kelly Fraccional (Half-Kelly) ───────────────────────────────
-KELLY_WIN_RATE: float = 0.60    # Tasa de ganancia historica base (p)
-KELLY_WIN_LOSS_RATIO: float = 1.0   # Ratio Ganancia/Perdida promedio (b) ajustado por TP/SL 1:1
+# CALIBRADO CON DATOS REALES (16 round-trips al 2026-10-18):
+#   WR empírico = 50.0%, Profit Factor = 1.30 (Avg Win / Avg Loss)
+#   Ratio real = $436.25 / $335.92 ≈ 1.30
+KELLY_WIN_RATE: float = 0.50    # Tasa de ganancia empirica real (actualizado de 0.60)
+KELLY_WIN_LOSS_RATIO: float = 1.30  # Ratio Ganancia/Perdida real (actualizado de 1.0)
 KELLY_FRACTION: float = 0.5     # Fraccion de Kelly aplicada (0.5 = Half-Kelly)
 MAX_POSITION_PCT: float = 0.15  # Techo duro maximo por operacion (15% del equity)
 
@@ -59,6 +62,29 @@ TAKE_PROFIT_PCT: float = 0.04   # Take-Profit: salida con +4% de ganancia
 STOP_LOSS_PCT: float = 0.04     # Stop-Loss: salida con -4% de perdida
 MAX_HOLD_DAYS: int = 5          # Dias maximos de holding antes de salida forzada
 SL_GRACE_PERIOD_MINS: int = 15  # Periodo de gracia (minutos) en la apertura para SL
+
+# ─── Break-Even Trailing Stop ─────────────────────────────────────────────────
+# Si la posicion alcanza BREAKEVEN_TRIGGER_PCT de ganancia, el Stop-Loss se
+# mueve a break-even (precio de entrada) para proteger capital. Esto evita que
+# un trade ganador cierre en rojo por liquidacion de viernes o whipsaw.
+# Ej: 0.02 = cuando el activo sube +2%, el SL se mueve a precio entrada.
+BREAKEVEN_TRIGGER_PCT: float = 0.02  # Umbral para activar break-even stop (+2%)
+
+# ─── EOW Inteligente (End-Of-Week Condicional) ────────────────────────────────
+# Permite mantener posiciones durante el fin de semana SI el activo cotiza
+# POR ENCIMA del precio de entrada (posicion en ganancia o break-even).
+# Si EOW_HOLD_IF_PROFITABLE=True: solo se liquida la posicion el viernes si
+# esta en perdida o si ha excedido MAX_HOLD_DAYS.
+# Poner en False para restaurar el comportamiento original (liquidar todo).
+EOW_HOLD_IF_PROFITABLE: bool = True  # True = No liquidar viernes si la posicion va ganando
+
+# ─── Filtro de Volatilidad Relativa (Anti-Whipsaw) ───────────────────────────
+# Filtra activos con volatilidad relativa (ATR/Close) excesiva antes de entrar.
+# Activos con ATR/Close > MAX_RELATIVE_ATR son omitidos aunque tengan señal RSI.
+# Previene entrar en activos como PLTR en fase de alta volatilidad sin rebote.
+# Poner en None para desactivar el filtro.
+MAX_RELATIVE_ATR: float = 0.04  # Maximo ATR/Close permitido (4% diario = muy volátil)
+ATR_FILTER_PERIOD: int = 14     # Periodo ATR para calcular volatilidad relativa
 
 # ─── Planificador Semanal ─────────────────────────────────────────────────────
 WEEKLY_CLOSE_TIME_EST: str = "15:45"    # Hora de liquidacion viernes (EST)

@@ -43,17 +43,18 @@ EST = pytz.timezone(TIMEZONE_EST)
 # ─── Definicion del esquema SQL ───────────────────────────────────────────────
 CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS trades (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    date        TEXT    NOT NULL,
-    ticker      TEXT    NOT NULL,
-    trade_type  TEXT    NOT NULL,
-    notional    REAL    NOT NULL,
-    entry_price REAL,
-    exit_price  REAL,
-    qty         REAL,
-    pnl         REAL,
-    pnl_pct     REAL,
-    kelly_pct   REAL
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    date            TEXT    NOT NULL,
+    ticker          TEXT    NOT NULL,
+    trade_type      TEXT    NOT NULL,
+    notional        REAL    NOT NULL,
+    entry_price     REAL,
+    exit_price      REAL,
+    qty             REAL,
+    pnl             REAL,
+    pnl_pct         REAL,
+    kelly_pct       REAL,
+    entry_trade_id  INTEGER  -- ID de la fila BUY padre (vincula round-trip BUY->SELL)
 );
 """
 
@@ -132,6 +133,14 @@ class TradeLogger:
             # Tabla aislada para cripto
             conn.execute(CREATE_CRYPTO_TABLE_SQL)
             conn.execute(CREATE_CRYPTO_INDEX_SQL)
+            # Migracion: agregar entry_trade_id si no existe en tabla existente
+            try:
+                conn.execute(
+                    "ALTER TABLE trades ADD COLUMN entry_trade_id INTEGER"
+                )
+                logger.info("Migracion: columna 'entry_trade_id' agregada a tabla trades.")
+            except Exception:
+                pass  # Ya existe — sqlite no soporta IF NOT EXISTS en ALTER TABLE
             conn.commit()
 
     @contextmanager
@@ -235,10 +244,10 @@ class TradeLogger:
         insert_sql = """
         INSERT INTO trades
             (date, ticker, trade_type, notional, entry_price, exit_price,
-             qty, pnl, pnl_pct, kelly_pct)
+             qty, pnl, pnl_pct, kelly_pct, entry_trade_id)
         VALUES
             (:date, :ticker, :trade_type, :notional, :entry_price, :exit_price,
-             :qty, :pnl, :pnl_pct, :kelly_pct)
+             :qty, :pnl, :pnl_pct, :kelly_pct, :entry_trade_id)
         """
         row = {
             "date": self._now_est_str(),
@@ -251,6 +260,7 @@ class TradeLogger:
             "pnl": trade_data.get("pnl"),
             "pnl_pct": trade_data.get("pnl_pct"),
             "kelly_pct": trade_data.get("kelly_pct"),
+            "entry_trade_id": trade_data.get("entry_trade_id"),  # Vincula round-trip
         }
 
         with self._get_connection() as conn:
