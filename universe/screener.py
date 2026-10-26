@@ -34,6 +34,7 @@ from config import (
     UNIVERSE_MIN_AVG_VOLUME,
     UNIVERSE_LOOKBACK_DAYS,
     UNIVERSE_CACHE_FILE,
+    UNIVERSE_DATA_FEED,
     TICKERS as FALLBACK_TICKERS,
 )
 
@@ -285,12 +286,13 @@ class UniverseScreener:
                 wait = 1.0
                 for attempt in range(1, MAX_RETRY_ATTEMPTS + 1):
                     try:
+                        feed_choice = DataFeed.SIP if UNIVERSE_DATA_FEED == "sip" else DataFeed.IEX
                         request = StockBarsRequest(
                             symbol_or_symbols=ticker,
                             timeframe=TimeFrame.Day,
                             start=start_date,
                             end=end_date,
-                            feed=DataFeed.IEX
+                            feed=feed_choice,
                         )
                         bars = self._client.get_stock_bars(request)
                         df = bars.df

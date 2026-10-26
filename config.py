@@ -32,14 +32,19 @@ TICKERS: list[str] = [
 UNIVERSE_SIZE: int = 10               # Numero de tickers a seleccionar (Top-N)
 UNIVERSE_MAX_PER_SECTOR: int = 4      # Maximo de tickers por sector en universo dinamico (diversificacion)
 UNIVERSE_MIN_PRICE: float = 10.0      # Precio minimo de cierre ($) para filtrar
-UNIVERSE_MIN_AVG_VOLUME: int = 5_000_000  # Volumen promedio minimo (30d) por dia
+# Feed de datos para screening e ingesta: 'iex' (gratuito) o 'sip' (consolidado de pago)
+import os
+UNIVERSE_DATA_FEED: str = os.getenv("ALPACA_DATA_FEED", "iex").lower()
+# Volumen promedio minimo (30d): En feed IEX (1-3% market share), las large-caps promedian 500k-3M.
+# Si se usa feed SIP consolidado, el umbral es 5M.
+UNIVERSE_MIN_AVG_VOLUME: int = 300_000 if UNIVERSE_DATA_FEED == "iex" else 5_000_000
 UNIVERSE_LOOKBACK_DAYS: int = 30      # Dias de historico para calcular metricas
 UNIVERSE_CACHE_FILE: str = "universe_cache.json"  # Cache JSON del universo activo
 # Hora de actualizacion del universo (lunes, 5 min despues de apertura)
 UNIVERSE_UPDATE_TIME_EST: str = "09:35"  # Formato HH:MM (hora EST)
 
 # ─── Parametros de Datos Historicos ──────────────────────────────────────────
-LOOKBACK_DAYS: int = 200        # Sesiones de mercado a descargar (para SMA-200)
+LOOKBACK_DAYS: int = 250        # Sesiones de mercado a descargar (margen holgado para SMA-200)
 BATCH_SIZE: int = 5             # Tickers por lote (control de rate limit)
 MARKET_REGIME_TICKER: str = "SPY" # Ticker para el filtro de régimen de mercado
 
@@ -58,18 +63,21 @@ KELLY_WIN_LOSS_RATIO: float = 1.30  # Ratio Ganancia/Perdida real (actualizado d
 KELLY_FRACTION: float = 0.5     # Fraccion de Kelly aplicada (0.5 = Half-Kelly)
 MAX_POSITION_PCT: float = 0.15  # Techo duro maximo por operacion (15% del equity)
 
+# ─── Control Cuantitativo de Riesgo Global en Equities (Portfolio Heat) ────────
+EQUITY_MAX_PORTFOLIO_HEAT: float = 0.60  # Techo maximo global de capital en equities (60% del equity total)
+EQUITY_MAX_OPEN_POSITIONS: int = 4       # Maximo de posiciones de equities abiertas concurrentes
+
 # ─── Parametros de Salida (TP/SL emulados) ───────────────────────────────────
 TAKE_PROFIT_PCT: float = 0.04   # Take-Profit: salida con +4% de ganancia
 STOP_LOSS_PCT: float = 0.04     # Stop-Loss: salida con -4% de perdida
 MAX_HOLD_DAYS: int = 5          # Dias maximos de holding antes de salida forzada
-SL_GRACE_PERIOD_MINS: int = 15  # Periodo de gracia (minutos) en la apertura para SL
+SL_GRACE_PERIOD_MINS: int = 15  # Periodo de gracia (minutos) en la apertura para SL (no aplica si caída > 1.5x SL)
 
 # ─── Break-Even Trailing Stop ─────────────────────────────────────────────────
 # Si la posicion alcanza BREAKEVEN_TRIGGER_PCT de ganancia, el Stop-Loss se
-# mueve a break-even (precio de entrada) para proteger capital. Esto evita que
-# un trade ganador cierre en rojo por liquidacion de viernes o whipsaw.
-# Ej: 0.02 = cuando el activo sube +2%, el SL se mueve a precio entrada.
-BREAKEVEN_TRIGGER_PCT: float = 0.02  # Umbral para activar break-even stop (+2%)
+# mueve a break-even (precio de entrada) para proteger capital.
+# Calibrado a +2.8% para evitar asfixiar la volatilidad intradia normal (+-1.5%) antes de tocar el +4%.
+BREAKEVEN_TRIGGER_PCT: float = 0.028  # Umbral para activar break-even stop (+2.8%)
 
 # ─── EOW Inteligente (End-Of-Week Condicional) ────────────────────────────────
 # Permite mantener posiciones durante el fin de semana SI el activo cotiza
@@ -102,6 +110,7 @@ SUPERVISOR_POLL_INTERVAL_SEC: int = 15  # Intervalo de monitoreo TP/SL en tiempo
 # ─── Almacenamiento de Datos ──────────────────────────────────────────────────
 DB_PATH: str = "trades.db"              # Ruta de la base de datos SQLite
 LOG_FILE: str = "bot.log"              # Archivo de log del sistema
+SUPERVISOR_STATE_FILE: str = "supervisor_state.json"  # Persistencia de estado de trailing stop
 # Nota: UNIVERSE_CACHE_FILE definido en la seccion Universe Screener
 
 # ─── Tipos de Operacion (para el Trade Log) ──────────────────────────────────

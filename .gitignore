@@ -13,6 +13,8 @@ __pycache__/
 *.db
 *.log
 trades_*.csv
+supervisor_state.json
+universe_cache.json
 
 # ─── Entornos virtuales ───────────────────────────────────────────────────────
 venv/

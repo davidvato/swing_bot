@@ -24,7 +24,14 @@ from alpaca.trading.models import Order, Position, TradeAccount
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockLatestTradeRequest
 
-from config import REQUEST_INTERVAL_SEC, MAX_RETRY_ATTEMPTS, USE_TEST_BUDGET, TEST_BUDGET_USD
+from config import (
+    REQUEST_INTERVAL_SEC,
+    MAX_RETRY_ATTEMPTS,
+    USE_TEST_BUDGET,
+    TEST_BUDGET_USD,
+    EQUITY_MAX_PORTFOLIO_HEAT,
+    EQUITY_MAX_OPEN_POSITIONS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -189,6 +196,33 @@ class OrderManager:
         return order
 
     @rate_limited
+    def close_position(self, symbol: str) -> Optional[Order]:
+        """
+        Cierra completamente una posicion de equity abierta usando el endpoint
+        nativo de Alpaca close_position.
+
+        Elimina cualquier discrepancia de redondeo en acciones fraccionarias
+        o errores de 'insufficient qty available'.
+
+        Args:
+            symbol: Simbolo bursatil a liquidar.
+
+        Returns:
+            Objeto Order si la posicion fue liquidada, None si ya estaba cerrada.
+        """
+        try:
+            order = self._client.close_position(symbol_or_asset_id=symbol)
+            logger.info(f"[CLOSE_POSITION] {symbol} liquidada exitosamente en Alpaca.")
+            return order
+        except Exception as exc:
+            err_msg = str(exc).lower()
+            if "position does not exist" in err_msg or "404" in err_msg:
+                logger.info(f"[CLOSE_POSITION] {symbol} ya no existe en Alpaca (cerrada previamente).")
+                return None
+            logger.error(f"[CLOSE_POSITION] Error al cerrar posicion {symbol}: {exc}")
+            raise
+
+    @rate_limited
     def get_open_positions(self) -> list[Position]:
         """
         Retorna las posiciones abiertas de EQUITY (us_equity) en la cuenta.
@@ -211,6 +245,66 @@ class OrderManager:
             f"(total Alpaca: {len(all_positions)})"
         )
         return positions
+
+    def can_open_position(
+        self,
+        symbol: str,
+        notional: float,
+        max_position_pct: float,
+        max_heat_pct: float = EQUITY_MAX_PORTFOLIO_HEAT,
+        max_positions: int = EQUITY_MAX_OPEN_POSITIONS,
+    ) -> tuple[bool, str]:
+        """
+        Evalua si la cuenta puede abrir una nueva posicion en Equities respetando:
+        1. No duplicidad de ticker.
+        2. Limite individual por posicion (% equity).
+        3. Techo maximo de posiciones simultaneas (EQUITY_MAX_OPEN_POSITIONS).
+        4. Limite de Portfolio Heat global (EQUITY_MAX_PORTFOLIO_HEAT).
+        5. Disponibilidad de buying power / cash.
+
+        Returns:
+            Tupla (allowed: bool, reason: str).
+        """
+        try:
+            equity = self.get_account_equity()
+            if equity <= 0:
+                return False, f"Equity no valido: ${equity}"
+
+            # Regla 2: Techo individual
+            max_notional_allowed = equity * max_position_pct * 1.05  # 5% de holgura por redondeo
+            if notional > max_notional_allowed:
+                return False, f"Notional ${notional:.2f} excede el techo permitido (${max_notional_allowed:.2f})"
+
+            open_positions = self.get_open_positions()
+
+            # Regla 1: No duplicar ticker
+            for pos in open_positions:
+                if pos.symbol == symbol:
+                    return False, f"Posicion activa existente en {symbol}"
+
+            # Regla 3: Limite de posiciones simultaneas
+            if len(open_positions) >= max_positions:
+                return False, f"Limite de posiciones simultaneas alcanzado ({len(open_positions)}/{max_positions})"
+
+            # Regla 4: Portfolio Heat global
+            current_heat_usd = sum(abs(float(p.market_value)) for p in open_positions)
+            if (current_heat_usd + notional) > (equity * max_heat_pct):
+                return False, (
+                    f"Portfolio Heat excedido: actual=${current_heat_usd:.2f} + nueva=${notional:.2f} "
+                    f"> max=${equity * max_heat_pct:.2f} ({max_heat_pct*100:.0f}%)"
+                )
+
+            # Regla 5: Buying power / cash real (si no esta en budget simulado)
+            if not USE_TEST_BUDGET:
+                acct = self.get_account()
+                bp = float(acct.buying_power)
+                if notional > bp:
+                    return False, f"Buying power insuficiente: requiere ${notional:.2f}, disponible ${bp:.2f}"
+
+            return True, "OK"
+        except Exception as exc:
+            logger.error(f"Error evaluando can_open_position para {symbol}: {exc}")
+            return False, f"Error interno: {exc}"
 
     @rate_limited
     def get_latest_quote(self, symbol: str) -> float:

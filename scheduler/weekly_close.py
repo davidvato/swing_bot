@@ -220,45 +220,51 @@ def friday_liquidation() -> None:
     except Exception as exc:
         logger.error(f"Error al obtener posiciones abiertas: {exc}")
 
-    # \u2500\u2500\u2500 Paso 2: Detener el supervisor asyncio de EQUITIES \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-    if _supervisor is not None:
-        try:
-            _supervisor.stop_all()
-            logger.info("Supervisor asyncio de equities detenido.")
-        except Exception as exc:
-            logger.error(f"Error al detener el supervisor: {exc}")
-
-    # \u2500\u2500\u2500 Paso 3: Cerrar solo posiciones de equity una por una \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-    # NOTA: NO se usa close_all_positions() porque cierra TODAS las posiciones
-    # en Alpaca, incluyendo cripto. Iteramos y vendemos solo las posiciones
-    # de equity filtradas en el Paso 1 para no tocar cripto.
-    # EOW Inteligente: Si EOW_HOLD_IF_PROFITABLE=True, solo se liquidan las
-    # posiciones que esten EN PERDIDA. Las ganadoras se mantienen activas bajo
-    # el limite MAX_HOLD_DAYS del supervisor (hasta 5 dias calendario).
-    # Esto elimina la principal fuga de alpha detectada en el backtesting.
+    # --- Paso 2: Separar posiciones a liquidar vs mantener (EOW Inteligente) ---
     if EOW_HOLD_IF_PROFITABLE:
         positions_to_close = [p for p in open_positions if float(p.unrealized_pl) < 0]
         positions_to_hold = [p for p in open_positions if float(p.unrealized_pl) >= 0]
         if positions_to_hold:
+            hold_symbols = [p.symbol for p in positions_to_hold]
             logger.info(
                 f"EOW INTELIGENTE: Manteniendo {len(positions_to_hold)} posicion(es) "
-                f"con ganancia durante el fin de semana: "
-                f"{[p.symbol for p in positions_to_hold]}"
+                f"con ganancia durante el fin de semana: {hold_symbols}"
             )
+        close_symbols = [p.symbol for p in positions_to_close]
         logger.info(
             f"EOW INTELIGENTE: Liquidando {len(positions_to_close)} posicion(es) "
-            f"en perdida: {[p.symbol for p in positions_to_close]}"
+            f"en perdida: {close_symbols}"
         )
     else:
-        # Comportamiento original: liquidar todo sin condicion
         positions_to_close = open_positions
         positions_to_hold = []
 
+    # --- Paso 3: Detener supervisor SOLO para posiciones que se van a liquidar ---
+    if _supervisor is not None and positions_to_close:
+        try:
+            for pos in positions_to_close:
+                if hasattr(_supervisor, "stop_position"):
+                    _supervisor.stop_position(pos.symbol)
+                else:
+                    _supervisor.stop_all()
+                    break
+            logger.info(f"Supervisor: tareas detenidas para {len(positions_to_close)} posiciones a liquidar.")
+        except Exception as exc:
+            logger.error(f"Error al detener corrutinas de supervision: {exc}")
+
+    # --- Paso 4: Cerrar posiciones de equity una por una (priorizando close_position) ---
     if positions_to_close:
         for pos in positions_to_close:
             try:
-                _order_manager.submit_sell(pos.symbol, float(pos.qty))
-                logger.info(f"  Sell a mercado enviado: {pos.symbol} qty={pos.qty}")
+                if hasattr(_order_manager, "close_position"):
+                    try:
+                        _order_manager.close_position(pos.symbol)
+                    except Exception as c_exc:
+                        logger.warning(f"close_position fallo para {pos.symbol}: {c_exc}. Usando submit_sell.")
+                        _order_manager.submit_sell(pos.symbol, float(pos.qty))
+                else:
+                    _order_manager.submit_sell(pos.symbol, float(pos.qty))
+                logger.info(f"  Venta de liquidacion ejecutada: {pos.symbol} qty={pos.qty}")
             except Exception as exc:
                 logger.error(
                     f"  Error cerrando {pos.symbol}: {exc}. "
@@ -267,8 +273,17 @@ def friday_liquidation() -> None:
     else:
         logger.info("Sin posiciones de equity a liquidar segun politica EOW activa.")
 
+    # --- Paso 5: Garantizar que las posiciones mantenidas siguen supervisadas ---
+    if positions_to_hold and _supervisor is not None:
+        try:
+            _supervisor.start()
+            logger.info(
+                f"Supervisor activo para {len(positions_to_hold)} posiciones mantenidas durante el fin de semana."
+            )
+        except Exception as exc:
+            logger.error(f"Error reactivando supervisor para posiciones mantenidas: {exc}")
 
-    # \u2500\u2500\u2500 Paso 4: Registrar cada cierre en el trade log \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+    # --- Paso 6: Registrar cada cierre en el trade log con entry_trade_id ---
     if _trade_logger is not None:
         for pos in positions_to_close:
             try:
@@ -280,6 +295,10 @@ def friday_liquidation() -> None:
                 pnl_pct = (current_price - entry_price) / entry_price if entry_price != 0 else 0.0
                 notional = entry_price * qty
 
+                parent_buy = _trade_logger.get_latest_buy(symbol)
+                entry_trade_id = parent_buy.get("id") if parent_buy else None
+                kelly_pct = parent_buy.get("kelly_pct") if parent_buy else None
+
                 trade_data = {
                     "ticker": symbol,
                     "trade_type": TRADE_TYPE_SELL_EOW,
@@ -289,7 +308,8 @@ def friday_liquidation() -> None:
                     "qty": qty,
                     "pnl": round(pnl, 4),
                     "pnl_pct": round(pnl_pct, 6),
-                    "kelly_pct": None,  # No disponible en liquidacion de viernes
+                    "kelly_pct": kelly_pct,
+                    "entry_trade_id": entry_trade_id,
                 }
                 _trade_logger.log_exit(trade_data)
 
@@ -300,7 +320,7 @@ def friday_liquidation() -> None:
 
     held_count = len(open_positions) - len(positions_to_close)
     logger.warning(
-        f"LIQUIDACION SEMANAL DE EQUITIES COMPLETADA — "
+        f"LIQUIDACION SEMANAL DE EQUITIES COMPLETADA - "
         f"{len(positions_to_close)} posicion(es) cerradas | "
         f"{held_count} mantenidas (EOW inteligente). "
         "Las posiciones cripto siguen activas bajo su supervisor 24/7."

@@ -23,9 +23,11 @@ LIMITACIONES (documentadas):
 """
 
 import asyncio
+import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, date, timedelta, time as dtime
+from pathlib import Path
 from typing import Optional
 
 import pytz
@@ -42,6 +44,7 @@ from config import (
     SL_GRACE_PERIOD_MINS,
     MARKET_OPEN_TIME_EST,
     BREAKEVEN_TRIGGER_PCT,
+    SUPERVISOR_STATE_FILE,
 )
 
 logger = logging.getLogger(__name__)
@@ -73,13 +76,15 @@ class PositionRecord:
     kelly_pct: float
     entry_trade_id: Optional[int] = field(default=None)  # ID del BUY en SQLite
     task: Optional[asyncio.Task] = field(default=None, repr=False)
-    highest_price: float = field(init=False)
+    highest_price: float = field(default=0.0)
     breakeven_activated: bool = field(default=False)     # Break-Even Stop activado
-    _sl_floor: float = field(default=0.0, init=False)    # Floor del SL tras break-even
+    _sl_floor: float = field(default=0.0)                # Floor del SL tras break-even
 
     def __post_init__(self):
-        self.highest_price = self.entry_price
-        self._sl_floor = 0.0  # Sin floor hasta que se active break-even
+        if self.highest_price <= 0.0:
+            self.highest_price = self.entry_price
+        if self.breakeven_activated and self._sl_floor <= 0.0:
+            self._sl_floor = self.entry_price
 
     @property
     def target_tp(self) -> float:
@@ -141,6 +146,40 @@ class PositionSupervisor:
         self._lock = asyncio.Lock()
         logger.info("PositionSupervisor inicializado.")
 
+    def _save_state(self) -> None:
+        """Persiste el estado actual de trailing stop y break-even en disco."""
+        try:
+            state = {}
+            for sym, rec in self._positions.items():
+                state[sym] = {
+                    "symbol": rec.symbol,
+                    "entry_price": rec.entry_price,
+                    "qty": rec.qty,
+                    "entry_date": rec.entry_date.isoformat(),
+                    "notional": rec.notional,
+                    "kelly_pct": rec.kelly_pct,
+                    "entry_trade_id": rec.entry_trade_id,
+                    "highest_price": rec.highest_price,
+                    "breakeven_activated": rec.breakeven_activated,
+                    "_sl_floor": rec._sl_floor,
+                }
+            Path(SUPERVISOR_STATE_FILE).write_text(
+                json.dumps(state, indent=2), encoding="utf-8"
+            )
+        except Exception as exc:
+            logger.error(f"Error guardando estado del supervisor: {exc}")
+
+    def _load_state(self) -> dict:
+        """Carga el estado previo de las posiciones desde disco."""
+        p = Path(SUPERVISOR_STATE_FILE)
+        if not p.exists():
+            return {}
+        try:
+            return json.loads(p.read_text(encoding="utf-8"))
+        except Exception as exc:
+            logger.warning(f"Error cargando {SUPERVISOR_STATE_FILE}: {exc}")
+            return {}
+
     def add_position(
         self,
         symbol: str,
@@ -150,6 +189,9 @@ class PositionSupervisor:
         kelly_pct: float,
         entry_date: Optional[date] = None,
         entry_trade_id: Optional[int] = None,
+        highest_price: Optional[float] = None,
+        breakeven_activated: bool = False,
+        sl_floor: float = 0.0,
     ) -> PositionRecord:
         """
         Registra una nueva posicion para supervision y lanza su corutina.
@@ -162,6 +204,9 @@ class PositionSupervisor:
             kelly_pct: Fraccion Kelly aplicada.
             entry_date: Fecha de entrada (default: hoy).
             entry_trade_id: ID del BUY en SQLite para vincular round-trip.
+            highest_price: Maximo historico alcanzado (para restauracion).
+            breakeven_activated: Si el break-even ya fue gatillado.
+            sl_floor: Suelo del SL si break-even esta activo.
 
         Returns:
             PositionRecord recien creado y registrado.
@@ -177,12 +222,17 @@ class PositionSupervisor:
             notional=notional,
             kelly_pct=kelly_pct,
             entry_trade_id=entry_trade_id,
+            highest_price=highest_price if highest_price and highest_price > 0 else entry_price,
+            breakeven_activated=breakeven_activated,
+            _sl_floor=sl_floor,
         )
         self._positions[symbol] = record
+        self._save_state()
         logger.info(
             f"[{symbol}] Posicion registrada: "
             f"entry=${entry_price:.2f}, qty={qty:.6f}, "
-            f"TP=${record.target_tp:.2f}, SL=${record.target_sl:.2f}"
+            f"TP=${record.target_tp:.2f}, SL=${record.target_sl:.2f}, "
+            f"Highest=${record.highest_price:.2f}, BreakEven={record.breakeven_activated}"
             + (f", BUY_ID={entry_trade_id}" if entry_trade_id else "")
         )
         return record
@@ -240,6 +290,7 @@ class PositionSupervisor:
                 # Actualizar trailing SL
                 if current_price > record.highest_price:
                     record.highest_price = current_price
+                    self._save_state()
 
                 # ─── Evaluar activacion de Break-Even Stop ────────────────────────
                 # Si el activo subió BREAKEVEN_TRIGGER_PCT desde entrada,
@@ -247,6 +298,7 @@ class PositionSupervisor:
                 gain_pct = (current_price - record.entry_price) / record.entry_price
                 if not record.breakeven_activated and gain_pct >= BREAKEVEN_TRIGGER_PCT:
                     record.activate_breakeven()
+                    self._save_state()
 
                 days_held = record.days_held
                 logger.debug(
@@ -273,19 +325,27 @@ class PositionSupervisor:
                     open_h, open_m = [int(x) for x in MARKET_OPEN_TIME_EST.split(":")]
                     market_open = now_est.replace(hour=open_h, minute=open_m, second=0, microsecond=0)
                     grace_end = market_open + timedelta(minutes=SL_GRACE_PERIOD_MINS)
-                    
-                    if now_est < grace_end:
+                    # Si la caída es catastrófica (>= 1.5x STOP_LOSS_PCT), cortar inmediatamente
+                    catastrophic_loss = pnl_pct <= -(STOP_LOSS_PCT * 1.5)
+
+                    if now_est < grace_end and not catastrophic_loss:
                         logger.debug(
                             f"[{symbol}] Precio <= SL pero dentro del periodo de gracia "
-                            f"(hasta {grace_end.strftime('%H:%M')}). Ignorando SL."
+                            f"(hasta {grace_end.strftime('%H:%M')}). Ignorando SL menor."
                         )
                     else:
                         exit_type = TRADE_TYPE_SELL_SL
-                        logger.warning(
-                            f"[{symbol}] STOP LOSS activado: "
-                            f"${current_price:.2f} <= ${record.target_sl:.2f} "
-                            f"({pnl_pct*100:.2f}%)"
-                        )
+                        if catastrophic_loss:
+                            logger.warning(
+                                f"[{symbol}] STOP LOSS CATASTROFICO: caída severa {pnl_pct*100:.2f}%. "
+                                "Bypasseando periodo de gracia."
+                            )
+                        else:
+                            logger.warning(
+                                f"[{symbol}] STOP LOSS activado: "
+                                f"${current_price:.2f} <= ${record.target_sl:.2f} "
+                                f"({pnl_pct*100:.2f}%)"
+                            )
 
                 elif days_held >= MAX_HOLD_DAYS:
                     exit_type = TRADE_TYPE_SELL_5D
@@ -329,13 +389,28 @@ class PositionSupervisor:
         symbol = record.symbol
         success = False
         try:
-            # Ejecutar venta en hilo separado (operacion bloqueante)
-            order = await asyncio.get_event_loop().run_in_executor(
-                None,
-                self._order_manager.submit_sell,
-                symbol,
-                record.qty,
-            )
+            # 1. Intentar liquidación nativa completa via close_position (evita errores de redondeo fraccionario)
+            order = None
+            if hasattr(self._order_manager, "close_position"):
+                try:
+                    order = await asyncio.get_event_loop().run_in_executor(
+                        None,
+                        self._order_manager.close_position,
+                        symbol,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        f"[{symbol}] close_position fallo: {exc}. Reintentando con submit_sell."
+                    )
+
+            # 2. Fallback a submit_sell por qty
+            if order is None:
+                order = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    self._order_manager.submit_sell,
+                    symbol,
+                    record.qty,
+                )
 
             if order is None:
                 logger.error(
@@ -380,6 +455,7 @@ class PositionSupervisor:
             if success:
                 async with self._lock:
                     self._positions.pop(symbol, None)
+                self._save_state()
 
     def start(self) -> None:
         """
@@ -396,6 +472,13 @@ class PositionSupervisor:
                 )
                 record.task = task
                 logger.info(f"[{symbol}] Tarea de supervision lanzada.")
+
+    def stop_position(self, symbol: str) -> None:
+        """Detiene la supervision de una posicion individual sin afectar a las demas."""
+        record = self._positions.get(symbol)
+        if record and record.task and not record.task.done():
+            record.task.cancel()
+            logger.info(f"[{symbol}] Tarea de supervision cancelada individualmente.")
 
     def stop_all(self) -> None:
         """
@@ -427,7 +510,8 @@ class PositionSupervisor:
     def rehydrate_positions(self) -> int:
         """
         Consulta las posiciones abiertas en Alpaca y reanuda su supervision
-        si no estaban siendo supervisadas. Extrae metadata historica de SQLite.
+        si no estaban siendo supervisadas. Restaura el estado de trailing stop
+        desde supervisor_state.json y metadata historica de SQLite.
         
         Returns:
             Cantidad de posiciones rehidratadas.
@@ -438,6 +522,7 @@ class PositionSupervisor:
             logger.error(f"Error rehidratando posiciones: {exc}")
             return 0
             
+        saved_state = self._load_state()
         rehydrated = 0
         for pos in open_positions:
             symbol = pos.symbol
@@ -447,11 +532,18 @@ class PositionSupervisor:
             entry_price = float(pos.avg_entry_price)
             qty = float(pos.qty)
             
-            # Buscar metadata original
+            # Restaurar snapshot previo si existe
+            saved = saved_state.get(symbol, {})
+            highest_price = saved.get("highest_price", entry_price)
+            breakeven_activated = saved.get("breakeven_activated", False)
+            sl_floor = saved.get("_sl_floor", 0.0)
+
+            # Buscar metadata original en trade log
             last_buy = self._trade_logger.get_latest_buy(symbol)
             if last_buy:
                 notional = last_buy.get("notional") or (entry_price * qty)
                 kelly_pct = last_buy.get("kelly_pct") or 0.0
+                entry_trade_id = last_buy.get("id")
                 try:
                     # Parsing '2026-08-31 09:30:32 EDT' -> date
                     date_str = last_buy.get("date", "").split(" ")[0]
@@ -462,6 +554,7 @@ class PositionSupervisor:
                 notional = entry_price * qty
                 kelly_pct = 0.0
                 entry_date = date.today()
+                entry_trade_id = None
                 
             self.add_position(
                 symbol=symbol,
@@ -470,10 +563,14 @@ class PositionSupervisor:
                 notional=notional,
                 kelly_pct=kelly_pct,
                 entry_date=entry_date,
+                entry_trade_id=entry_trade_id,
+                highest_price=highest_price,
+                breakeven_activated=breakeven_activated,
+                sl_floor=sl_floor,
             )
             rehydrated += 1
             
         if rehydrated > 0:
-            logger.info(f"Rehidratacion completada: {rehydrated} posiciones asimiladas.")
+            logger.info(f"Rehidratacion completada: {rehydrated} posiciones asimiladas (estado restaurado).")
             
         return rehydrated

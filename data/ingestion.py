@@ -26,6 +26,8 @@ from config import (
     BATCH_SIZE,
     REQUEST_INTERVAL_SEC,
     MAX_RETRY_ATTEMPTS,
+    UNIVERSE_DATA_FEED,
+    TIMEZONE_EST,
 )
 
 logger = logging.getLogger(__name__)
@@ -166,12 +168,13 @@ class DataClient:
 
             for ticker in batch:
                 try:
+                    feed_choice = DataFeed.SIP if UNIVERSE_DATA_FEED == "sip" else DataFeed.IEX
                     request = StockBarsRequest(
                         symbol_or_symbols=ticker,
                         timeframe=TimeFrame.Day,
                         start=start_date,
                         end=end_date,
-                        feed=DataFeed.IEX
+                        feed=feed_choice,
                     )
                     df_raw = self._fetch_bars_with_retry(request)
                     df_norm = self._normalize_dataframe(df_raw, ticker)
@@ -199,3 +202,42 @@ class DataClient:
             f"Ingesta completada: {len(results)}/{len(tickers)} tickers descargados."
         )
         return results
+
+    @staticmethod
+    def filter_completed_bars(df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Garantiza que el DataFrame contenga UNICAMENTE sesiones cerradas y completadas.
+
+        Al consultar barras diarias al inicio de la sesion (e.g. 09:30 EST), Alpaca
+        suele incluir la barra diaria en curso con los datos parciales del dia de hoy.
+        Para un modelo swing basado en cierres diarios confirmados (SMA-200, RSI-4, 4D),
+        esta barra parcial introduce sesgo e inestabilidad (lookahead / incomplete candle).
+
+        Si el timestamp de la ultima fila corresponde al dia de hoy (en EST), se
+        excluye dicha fila para evaluar señales estrictamente sobre sesiones cerradas.
+
+        Args:
+            df: DataFrame normalizado indexado por timestamp en America/New_York.
+
+        Returns:
+            DataFrame filtrado solo con sesiones terminadas.
+        """
+        if df.empty:
+            return df
+
+        import pytz
+        est = pytz.timezone(TIMEZONE_EST)
+        today_est = datetime.now(est).date()
+
+        # Si el indice tiene timezone, verificar fecha de la ultima barra
+        if hasattr(df.index, "date"):
+            last_date = df.index[-1].date()
+            if last_date >= today_est:
+                logger.debug(
+                    f"Excluyendo barra en progreso del dia de hoy ({today_est}) "
+                    "para calculo de senales sobre sesiones confirmadas."
+                )
+                return df[df.index.date < today_est].copy()
+
+        return df
+

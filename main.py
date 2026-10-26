@@ -48,8 +48,10 @@ from config import (
     MARKET_OPEN_TIME_EST,
     MARKET_CLOSE_TIME_EST,
     WEEKLY_CLOSE_TIME_EST,
+    UNIVERSE_UPDATE_TIME_EST,
     SUPERVISOR_POLL_INTERVAL_SEC,
     MARKET_REGIME_TICKER,
+    EQUITY_MAX_PORTFOLIO_HEAT,
     CRYPTO_MAX_POSITION_PCT,
     CRYPTO_KELLY_WIN_RATE,
     CRYPTO_KELLY_WIN_LOSS_RATIO,
@@ -80,6 +82,12 @@ from ml.features import build_stationary_features
 # ─── Configuracion del sistema de logging ─────────────────────────────────────
 def _setup_logging() -> None:
     """Configura el logging estructurado a archivo y consola."""
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
     log_format = "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
     date_format = "%Y-%m-%d %H:%M:%S"
 
@@ -256,10 +264,12 @@ def run_dry_run(api_key: str, secret_key: str) -> None:
             print(f"  {ticker:<8} {'SIN DATOS':>10}")
             continue
 
-        df = compute_indicators(data_dict[ticker])
+        df_raw = data_dict[ticker]
+        df_completed = DataClient.filter_completed_bars(df_raw)
+        df = compute_indicators(df_completed)
         summary = get_signal_summary(ticker, df)
 
-        signal_str = "✓ BUY" if summary["signal"] else "—"
+        signal_str = "[BUY]" if summary["signal"] else "—"
         consec_str = "SI" if summary.get("consec_down") else "NO"
 
         print(
@@ -339,20 +349,30 @@ async def run_daily_signals(
         None, data_client.get_historical_data, [MARKET_REGIME_TICKER]
     )
     if MARKET_REGIME_TICKER in regime_data and not regime_data[MARKET_REGIME_TICKER].empty:
-        df_regime = regime_data[MARKET_REGIME_TICKER]
+        df_regime_raw = regime_data[MARKET_REGIME_TICKER]
+        df_regime = DataClient.filter_completed_bars(df_regime_raw)
         if len(df_regime) >= 2:
-            last_close = df_regime['close'].iloc[-1]
-            prev_close = df_regime['close'].iloc[-2]
+            last_close = float(df_regime['close'].iloc[-1])
+            prev_close = float(df_regime['close'].iloc[-2])
             daily_return = (last_close - prev_close) / prev_close
             
-            if daily_return < -0.015:  # Caída > 1.5%
+            # Chequeo complementario: si hoy abrio con gap down severo
+            gap_return = 0.0
+            if len(df_regime_raw) > len(df_regime):
+                today_open = float(df_regime_raw['open'].iloc[-1])
+                gap_return = (today_open - last_close) / last_close
+
+            if daily_return < -0.015 or gap_return < -0.015:  # Caída sesión previa o gap > 1.5%
                 logger.warning(
-                    f"REGIMEN DE MERCADO NEGATIVO: {MARKET_REGIME_TICKER} cayó "
-                    f"{daily_return*100:.2f}% ayer. Suspendiendo compras hoy."
+                    f"REGIMEN DE MERCADO NEGATIVO: {MARKET_REGIME_TICKER} retorno={daily_return*100:.2f}%, "
+                    f"gap={gap_return*100:.2f}%. Suspendiendo compras hoy."
                 )
                 return
             else:
-                logger.info(f"Regimen de mercado OK: {MARKET_REGIME_TICKER} return = {daily_return*100:.2f}%")
+                logger.info(
+                    f"Regimen de mercado OK: {MARKET_REGIME_TICKER} return={daily_return*100:.2f}%, "
+                    f"gap={gap_return*100:.2f}%"
+                )
 
     # ─── Paso 3: Descargar datos historicos ──────────────────────────────────
     logger.info("Descargando datos historicos...")
@@ -372,7 +392,10 @@ async def run_daily_signals(
             logger.warning(f"[{ticker}] Sin datos historicos. Ticker omitido.")
             continue
 
-        df = compute_indicators(data_dict[ticker])
+        # Evaluar senales estrictamente sobre sesiones completadas
+        df_raw = data_dict[ticker]
+        df_completed = DataClient.filter_completed_bars(df_raw)
+        df = compute_indicators(df_completed)
         primary_signal = generate_signal(df)
 
         if not primary_signal:
@@ -425,6 +448,20 @@ async def run_daily_signals(
             logger.warning(f"[{ticker}] Notional dinámico = 0. Señal descartada.")
             continue
 
+        # ── Control Cuantitativo de Riesgo: verificar broker & Portfolio Heat ───
+        can_open, risk_reason = await asyncio.get_event_loop().run_in_executor(
+            None,
+            order_manager.can_open_position,
+            ticker,
+            dynamic_notional,
+            MAX_POSITION_PCT,
+        )
+        if not can_open:
+            logger.warning(
+                f"[{ticker}] Orden omitida por gestion de riesgo: {risk_reason}"
+            )
+            continue
+
         logger.info(
             f"[{ticker}] SEÑAL DE COMPRA APROBADA (Capa 1 + Capa 2). "
             f"P(TP)={ml_prob:.3f} | Notional=${dynamic_notional:,.2f}. "
@@ -440,8 +477,11 @@ async def run_daily_signals(
             logger.error(f"[{ticker}] Orden rechazada por la API.")
             continue
 
-        # Obtener precio de entrada aproximado del ultimo cierre
-        entry_price = float(df["close"].iloc[-1])
+        # Obtener precio de referencia en tiempo real
+        latest_quote = await asyncio.get_event_loop().run_in_executor(
+            None, order_manager.get_latest_quote, ticker
+        )
+        entry_price = latest_quote if latest_quote > 0 else float(df_completed["close"].iloc[-1])
         # Cantidad estimada de acciones = notional dinámico / precio_entrada
         estimated_qty = dynamic_notional / entry_price if entry_price > 0 else 0.0
 
@@ -466,7 +506,7 @@ async def run_daily_signals(
 
         orders_placed += 1
         logger.info(
-            f"[{ticker}] Orden enviada: ${notional:.2f} nocional | "
+            f"[{ticker}] Orden enviada: ${dynamic_notional:.2f} nocional | "
             f"Precio ref: ${entry_price:.2f} | "
             f"Order ID: {order.id}"
         )
@@ -763,6 +803,8 @@ async def run_main_loop(
     # Cargar last_signal_date desde disco para sobrevivir reinicios
     STATE_FILE = "bot_state.json"
     last_signal_date = None
+    last_friday_close_date = None
+    last_universe_update_date = None
     try:
         import json
         from pathlib import Path
@@ -771,6 +813,10 @@ async def run_main_loop(
                 state = json.load(f)
                 if "last_signal_date" in state:
                     last_signal_date = datetime.strptime(state["last_signal_date"], "%Y-%m-%d").date()
+                if "last_friday_close_date" in state:
+                    last_friday_close_date = datetime.strptime(state["last_friday_close_date"], "%Y-%m-%d").date()
+                if "last_universe_update_date" in state:
+                    last_universe_update_date = datetime.strptime(state["last_universe_update_date"], "%Y-%m-%d").date()
     except Exception as e:
         logger.error(f"Error cargando estado: {e}")
         
@@ -783,8 +829,31 @@ async def run_main_loop(
             today = now_est.date()
             current_hour = now_est.replace(minute=0, second=0, microsecond=0)
 
-            # Ejecutar trabajos pendientes del scheduler (viernes 15:45)
+            # Ejecutar scheduler complementario
             schedule.run_pending()
+
+            # ─── Planificador Robusto en Zona Horaria EST (independiente del reloj local) ──
+            # 1. Liquidacion de equities los viernes a las 15:45 EST
+            if now_est.weekday() == 4:
+                close_h, close_m = [int(x) for x in WEEKLY_CLOSE_TIME_EST.split(":")]
+                if now_est.time() >= dtime(close_h, close_m) and last_friday_close_date != today:
+                    logger.info(
+                        f"Horario de cierre de viernes alcanzado ({WEEKLY_CLOSE_TIME_EST} EST). "
+                        "Ejecutando liquidacion semanal de equities..."
+                    )
+                    await asyncio.get_event_loop().run_in_executor(None, friday_liquidation)
+                    last_friday_close_date = today
+
+            # 2. Actualizacion semanal del universo los lunes a las 09:35 EST
+            if now_est.weekday() == 0:
+                upd_h, upd_m = [int(x) for x in UNIVERSE_UPDATE_TIME_EST.split(":")]
+                if now_est.time() >= dtime(upd_h, upd_m) and last_universe_update_date != today:
+                    logger.info(
+                        f"Horario de actualizacion de universo alcanzado ({UNIVERSE_UPDATE_TIME_EST} EST). "
+                        "Ejecutando screener dinamico..."
+                    )
+                    await asyncio.get_event_loop().run_in_executor(None, screener.select_universe)
+                    last_universe_update_date = today
 
             # ─── Ejecutar ciclo de señales una vez al dia (al abrir mercado) ──
             if _is_market_open():
@@ -803,7 +872,11 @@ async def run_main_loop(
                     try:
                         import json
                         with open(STATE_FILE, "w") as f:
-                            json.dump({"last_signal_date": str(today)}, f)
+                            json.dump({
+                                "last_signal_date": str(today),
+                                "last_friday_close_date": str(last_friday_close_date) if last_friday_close_date else None,
+                                "last_universe_update_date": str(last_universe_update_date) if last_universe_update_date else None,
+                            }, f, indent=2)
                     except Exception as e:
                         logger.error(f"Error guardando estado: {e}")
 
