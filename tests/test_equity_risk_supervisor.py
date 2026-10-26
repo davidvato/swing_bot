@@ -259,3 +259,173 @@ async def test_supervisor_stop_position_selective():
 
     # Limpieza
     rec_msft.task.cancel()
+
+
+# ============================================================================
+# 4. Pruebas de Market Hours Awareness y TP/SL Dinámico ATR
+# ============================================================================
+
+def test_is_market_open_now_logic():
+    from datetime import datetime
+    import zoneinfo
+    from execution.supervisor import is_market_open_now
+
+    tz_est = zoneinfo.ZoneInfo("America/New_York")
+    # Martes 11:30 AM EST -> Abierto
+    dt_open = datetime(2026, 10, 27, 11, 30, tzinfo=tz_est)
+    assert is_market_open_now(dt_open) is True
+
+    # Martes 08:30 AM EST -> Cerrado (pre-market)
+    dt_pre = datetime(2026, 10, 27, 8, 30, tzinfo=tz_est)
+    assert is_market_open_now(dt_pre) is False
+
+    # Martes 17:00 PM EST -> Cerrado (post-market)
+    dt_post = datetime(2026, 10, 27, 17, 0, tzinfo=tz_est)
+    assert is_market_open_now(dt_post) is False
+
+    # Domingo 12:00 PM EST -> Cerrado (fin de semana)
+    dt_weekend = datetime(2026, 10, 25, 12, 0, tzinfo=tz_est)
+    assert is_market_open_now(dt_weekend) is False
+
+
+def test_dynamic_atr_tpsl_calculation_bounds():
+    """Valida el cálculo de TP y SL dinámico por ATR con pisos y techos."""
+    mock_orders = MagicMock()
+    mock_trade_log = MagicMock()
+    sup = PositionSupervisor(order_manager=mock_orders, trade_logger=mock_trade_log)
+
+    # 1. Activo muy estable (KO): entry=100.0, ATR=1.0 (1%)
+    # TP sin techo = 1.0 * 1.5 = 1.5% -> debe aplicarse el PISO de 2.5% (0.025)
+    # SL sin piso  = 1.0 * 1.2 = 1.2% -> debe aplicarse el PISO de 2.0% (0.020)
+    rec_stable = sup.add_position("KO", entry_price=100.0, qty=10.0, notional=1000.0, kelly_pct=0.10, atr_at_entry=1.0)
+    assert rec_stable.tp_pct == config.EQUITY_MIN_TP_PCT
+    assert rec_stable.sl_pct == config.EQUITY_MIN_SL_PCT
+    assert rec_stable.target_tp == 100.0 * 1.025
+    assert rec_stable.target_sl == 100.0 * (1.0 - 0.020)
+
+    # 2. Activo muy volátil (NVDA): entry=100.0, ATR=5.0 (5%)
+    # TP sin techo = 5.0 * 1.5 = 7.5% -> debe aplicarse el TECHO de 6.0% (0.060)
+    # SL sin techo = 5.0 * 1.2 = 6.0% -> debe aplicarse el TECHO de 5.0% (0.050)
+    rec_vol = sup.add_position("NVDA", entry_price=100.0, qty=10.0, notional=1000.0, kelly_pct=0.10, atr_at_entry=5.0)
+    assert rec_vol.tp_pct == config.EQUITY_MAX_TP_PCT
+    assert rec_vol.sl_pct == config.EQUITY_MAX_SL_PCT
+    assert rec_vol.target_tp == 100.0 * 1.060
+    assert rec_vol.target_sl == 100.0 * (1.0 - 0.050)
+
+
+# ============================================================================
+# 5. Pruebas de Circuit Breaker, Fill Synchronization y Spread Control
+# ============================================================================
+
+def test_wait_for_order_fill_success():
+    mgr = OrderManager("dummy_key", "dummy_secret")
+    mock_order = MagicMock()
+    mock_order.status = "filled"
+    mock_order.symbol = "AAPL"
+    mock_order.filled_avg_price = "150.25"
+    mock_order.filled_qty = "10.0"
+    mgr._client.get_order_by_id = MagicMock(return_value=mock_order)
+
+    filled = mgr.wait_for_order_fill("ord_123", timeout=1.0)
+    assert filled == mock_order
+    assert float(filled.filled_avg_price) == 150.25
+
+
+def test_get_spread_pct():
+    mgr = OrderManager("dummy_key", "dummy_secret")
+    mock_quote = MagicMock()
+    mock_quote.ask_price = 100.20
+    mock_quote.bid_price = 100.00
+    mgr._data_client.get_stock_latest_quote = MagicMock(return_value={"AAPL": mock_quote})
+
+    spread = mgr.get_spread_pct("AAPL")
+    # mid = 100.10, spread = 0.20 / 100.10 ≈ 0.001998
+    assert 0.0019 < spread < 0.0021
+
+
+def test_circuit_breaker_blocks_on_consecutive_losses():
+    with tempfile.NamedTemporaryFile(suffix=".db") as tmp:
+        db_path = tmp.name
+
+    with patch("execution.orders.DB_PATH", db_path):
+        # Crear tabla y simular 3 pérdidas consecutivas
+        import sqlite3
+        with sqlite3.connect(db_path) as conn:
+            conn.execute(
+                "CREATE TABLE trades (id INTEGER PRIMARY KEY, date TEXT, ticker TEXT, "
+                "trade_type TEXT, pnl REAL, pnl_pct REAL, notional REAL)"
+            )
+            conn.execute("INSERT INTO trades VALUES (1, '2026-10-20', 'AAPL', 'SELL_SL', -50.0, -0.04, 1250.0)")
+            conn.execute("INSERT INTO trades VALUES (2, '2026-10-21', 'MSFT', 'SELL_SL', -40.0, -0.04, 1000.0)")
+            conn.execute("INSERT INTO trades VALUES (3, '2026-10-22', 'NVDA', 'SELL_SL', -60.0, -0.04, 1500.0)")
+
+        mgr = OrderManager("dummy_key", "dummy_secret")
+        mgr.get_account_equity = MagicMock(return_value=10_000.0)
+        mgr.get_open_positions = MagicMock(return_value=[])
+
+        allowed, reason = mgr.can_open_position("AMZN", 500.0, 0.10)
+        assert not allowed
+        assert "Circuit Breaker ACTIVO" in reason
+        assert "perdidas consecutivas" in reason
+
+
+# ============================================================================
+# 6. Pruebas de Analítica Cuantitativa y Filtro de Earnings
+# ============================================================================
+
+def test_earnings_filter_resilience():
+    from signals.earnings import EarningsCalendarFilter
+    filt = EarningsCalendarFilter()
+    # No debe arrojar excepcion y retorna bool
+    result = filt.has_upcoming_earnings("AAPL")
+    assert isinstance(result, bool)
+
+
+def test_trade_logger_quantitative_metrics():
+    with tempfile.NamedTemporaryFile(suffix=".db") as tmp:
+        db_path = tmp.name
+
+    from logging_.trade_log import TradeLogger
+    tl = TradeLogger(db_path=db_path)
+
+    # Insertar 3 ganadores y 1 perdedor
+    # Trade 1: +100 USD (+5%)
+    # Trade 2: +60 USD (+3%)
+    # Trade 3: +40 USD (+2%)
+    # Trade 4: -50 USD (-2.5%)
+    # Gross profit = 200, Gross loss = 50 -> Profit Factor = 4.0
+    # Net PnL = 150, Win Rate = 75%
+    tl.log_exit({
+        "ticker": "AAPL", "notional": 2000.0, "exit_price": 105.0,
+        "entry_price": 100.0, "qty": 20.0, "pnl": 100.0, "pnl_pct": 0.05,
+        "trade_type": "SELL_TP",
+    })
+    tl.log_exit({
+        "ticker": "MSFT", "notional": 2000.0, "exit_price": 103.0,
+        "entry_price": 100.0, "qty": 20.0, "pnl": 60.0, "pnl_pct": 0.03,
+        "trade_type": "SELL_TP",
+    })
+    tl.log_exit({
+        "ticker": "NVDA", "notional": 2000.0, "exit_price": 102.0,
+        "entry_price": 100.0, "qty": 20.0, "pnl": 40.0, "pnl_pct": 0.02,
+        "trade_type": "SELL_TP",
+    })
+    tl.log_exit({
+        "ticker": "AMZN", "notional": 2000.0, "exit_price": 97.5,
+        "entry_price": 100.0, "qty": 20.0, "pnl": -50.0, "pnl_pct": -0.025,
+        "trade_type": "SELL_SL",
+    })
+
+    metrics = tl.get_quantitative_metrics()
+    assert metrics["total_trades"] == 4
+    assert metrics["winning_trades"] == 3
+    assert metrics["losing_trades"] == 1
+    assert metrics["win_rate"] == 0.75
+    assert metrics["profit_factor"] == 4.0
+    assert metrics["net_pnl_usd"] == 150.0
+    assert metrics["gross_profit_usd"] == 200.0
+    assert metrics["gross_loss_usd"] == 50.0
+    assert metrics["sharpe_ratio"] > 0
+    assert metrics["sortino_ratio"] > 0
+    assert metrics["expectancy_usd"] > 0
+

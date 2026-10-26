@@ -68,10 +68,37 @@ EQUITY_MAX_PORTFOLIO_HEAT: float = 0.60  # Techo maximo global de capital en equ
 EQUITY_MAX_OPEN_POSITIONS: int = 4       # Maximo de posiciones de equities abiertas concurrentes
 
 # ─── Parametros de Salida (TP/SL emulados) ───────────────────────────────────
-TAKE_PROFIT_PCT: float = 0.04   # Take-Profit: salida con +4% de ganancia
-STOP_LOSS_PCT: float = 0.04     # Stop-Loss: salida con -4% de perdida
+TAKE_PROFIT_PCT: float = 0.04   # Take-Profit base (fallback): salida con +4% de ganancia
+STOP_LOSS_PCT: float = 0.04     # Stop-Loss base (fallback): salida con -4% de perdida
 MAX_HOLD_DAYS: int = 5          # Dias maximos de holding antes de salida forzada
 SL_GRACE_PERIOD_MINS: int = 15  # Periodo de gracia (minutos) en la apertura para SL (no aplica si caída > 1.5x SL)
+
+# ─── TP/SL Dinámico basado en ATR para Equities ───────────────────────────────
+# Adapta el objetivo de ganancia y el riesgo al régimen de volatilidad de cada acción.
+# Fórmula: TP = entry + (ATR × 1.5), SL = entry - (ATR × 1.2), acotado entre pisos y techos.
+EQUITY_DYNAMIC_ATR_TPSL: bool = True     # True = calcular TP/SL proporcional al ATR del ticker
+EQUITY_ATR_TP_MULT: float = 1.5          # Multiplicador TP (1.5x ATR)
+EQUITY_ATR_SL_MULT: float = 1.2          # Multiplicador SL (1.2x ATR)
+EQUITY_MIN_TP_PCT: float = 0.025         # Piso mínimo de TP (+2.5%) para activos estables
+EQUITY_MAX_TP_PCT: float = 0.060         # Techo máximo de TP (+6.0%)
+EQUITY_MIN_SL_PCT: float = 0.020         # Piso mínimo de SL (-2.0%)
+EQUITY_MAX_SL_PCT: float = 0.050         # Techo máximo de SL (-5.0%) para activos muy volátiles
+
+# ─── Circuit Breaker a Nivel de Cartera (Control Sistémico de Riesgo) ─────────
+# Detiene compras temporales ante rachas de pérdidas o caídas pronunciadas del equity.
+CIRCUIT_BREAKER_ENABLED: bool = True
+CIRCUIT_BREAKER_MAX_CONSEC_LOSSES: int = 3   # Pausar si hay 3 pérdidas consecutivas cerradas
+CIRCUIT_BREAKER_MAX_WEEKLY_DD_PCT: float = 0.05 # Pausar si el drawdown semanal supera el 5%
+CIRCUIT_BREAKER_COOLDOWN_HOURS: int = 48    # Horas de enfriamiento antes de reanudar
+
+# ─── Filtro de Anuncios de Resultados Trimestrales (Earnings Risk) ────────────
+# Previene entrar en activos con anuncio de resultados en la ventana de +/- 48h.
+EARNINGS_FILTER_ENABLED: bool = True
+EARNINGS_WINDOW_DAYS: int = 2
+
+# ─── Control de Ejecución y Slippage ──────────────────────────────────────────
+MAX_ALLOWED_SPREAD_PCT: float = 0.0025   # Spread máximo tolerado (0.25%) para compras de mercado
+ORDER_FILL_TIMEOUT_SEC: float = 3.0      # Tiempo máximo de espera para confirmar fill real
 
 # ─── Break-Even Trailing Stop ─────────────────────────────────────────────────
 # Si la posicion alcanza BREAKEVEN_TRIGGER_PCT de ganancia, el Stop-Loss se

@@ -437,6 +437,131 @@ class TradeLogger:
         
         return summary
 
+    def get_quantitative_metrics(self) -> dict:
+        """
+        Calcula metricas cuantitativas institucionales de performance sobre
+        todos los trades cerrados de Equities en SQLite:
+        - Win Rate, Profit Factor, Win/Loss Ratio.
+        - Expectancy matematica por trade.
+        - Sharpe Ratio y Sortino Ratio anualizados.
+        - Maximum Drawdown (MDD) y maxima racha de perdidas consecutivas.
+
+        Returns:
+            Diccionario con todas las metricas de riesgo y retorno.
+        """
+        import math
+        query = """
+        SELECT id, date, ticker, pnl, pnl_pct, trade_type
+        FROM trades
+        WHERE trade_type LIKE 'SELL%'
+        ORDER BY id ASC
+        """
+        with self._get_connection() as conn:
+            cursor = conn.execute(query)
+            rows = [dict(r) for r in cursor.fetchall()]
+
+        total_trades = len(rows)
+        if total_trades == 0:
+            return {
+                "total_trades": 0,
+                "win_rate": 0.0,
+                "profit_factor": 0.0,
+                "net_pnl_usd": 0.0,
+                "sharpe_ratio": 0.0,
+                "sortino_ratio": 0.0,
+                "max_drawdown_usd": 0.0,
+                "expectancy_usd": 0.0,
+                "win_loss_ratio": 0.0,
+                "consecutive_losses_max": 0,
+            }
+
+        pnls = [float(r["pnl"] or 0.0) for r in rows]
+        pnl_pcts = [float(r["pnl_pct"] or 0.0) for r in rows]
+
+        winning_pnls = [p for p in pnls if p > 0]
+        losing_pnls = [abs(p) for p in pnls if p < 0]
+
+        wins = len(winning_pnls)
+        losses = len(losing_pnls)
+        breakevens = total_trades - wins - losses
+        win_rate = wins / total_trades if total_trades > 0 else 0.0
+
+        gross_profit = sum(winning_pnls)
+        gross_loss = sum(losing_pnls)
+        net_pnl = gross_profit - gross_loss
+
+        profit_factor = round(gross_profit / gross_loss, 2) if gross_loss > 0 else (999.0 if gross_profit > 0 else 0.0)
+        avg_win = (gross_profit / wins) if wins > 0 else 0.0
+        avg_loss = (gross_loss / losses) if losses > 0 else 0.0
+        win_loss_ratio = round(avg_win / avg_loss, 2) if avg_loss > 0 else 0.0
+
+        # Expectancy: (WR * Avg Win) - ((1 - WR) * Avg Loss)
+        expectancy = (win_rate * avg_win) - ((1.0 - win_rate) * avg_loss)
+
+        # Sharpe y Sortino Ratio anualizados (asumiendo 252 sesiones anuales)
+        sharpe = 0.0
+        sortino = 0.0
+        if len(pnl_pcts) >= 2:
+            mean_ret = sum(pnl_pcts) / len(pnl_pcts)
+            variance = sum((r - mean_ret) ** 2 for r in pnl_pcts) / (len(pnl_pcts) - 1)
+            std_ret = math.sqrt(variance) if variance > 0 else 0.0
+            if std_ret > 0:
+                sharpe = round((mean_ret / std_ret) * math.sqrt(252), 2)
+
+            # Downside deviation para Sortino (solo retornos negativos contra 0.0)
+            downside_sq = [min(0.0, r) ** 2 for r in pnl_pcts]
+            downside_std = math.sqrt(sum(downside_sq) / len(downside_sq)) if downside_sq else 0.0
+            if downside_std > 0:
+                sortino = round((mean_ret / downside_std) * math.sqrt(252), 2)
+
+        # Maximum Drawdown en USD
+        cum_pnl = 0.0
+        peak = 0.0
+        max_dd = 0.0
+        for p in pnls:
+            cum_pnl += p
+            if cum_pnl > peak:
+                peak = cum_pnl
+            dd = peak - cum_pnl
+            if dd > max_dd:
+                max_dd = dd
+
+        # Máxima racha histórica de pérdidas consecutivas
+        max_consec_losses = 0
+        current_streak = 0
+        for p in pnls:
+            if p < 0:
+                current_streak += 1
+                if current_streak > max_consec_losses:
+                    max_consec_losses = current_streak
+            else:
+                current_streak = 0
+
+        metrics = {
+            "total_trades": total_trades,
+            "winning_trades": wins,
+            "losing_trades": losses,
+            "breakeven_trades": breakevens,
+            "win_rate": round(win_rate, 4),
+            "profit_factor": profit_factor,
+            "net_pnl_usd": round(net_pnl, 2),
+            "gross_profit_usd": round(gross_profit, 2),
+            "gross_loss_usd": round(gross_loss, 2),
+            "avg_win_usd": round(avg_win, 2),
+            "avg_loss_usd": round(avg_loss, 2),
+            "win_loss_ratio": win_loss_ratio,
+            "expectancy_usd": round(expectancy, 2),
+            "sharpe_ratio": sharpe,
+            "sortino_ratio": sortino,
+            "max_drawdown_usd": round(max_dd, 2),
+            "consecutive_losses_max": max_consec_losses,
+        }
+        logger.info(
+            f"Metricas Cuantitativas: Ops={total_trades} | WR={win_rate*100:.1f}% | "
+            f"PF={profit_factor} | Sharpe={sharpe} | Sortino={sortino} | MaxDD=${max_dd:.2f}"
+        )
+        return metrics
+
     # ─── Metodos de Cripto ────────────────────────────────────────────────────
 
     def log_crypto_entry(self, trade_data: dict) -> int:

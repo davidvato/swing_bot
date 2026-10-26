@@ -14,6 +14,7 @@ Restricciones criticas implementadas:
 
 import time
 import logging
+import sqlite3
 import functools
 from typing import Optional
 
@@ -22,7 +23,7 @@ from alpaca.trading.requests import MarketOrderRequest, GetAssetsRequest
 from alpaca.trading.enums import OrderSide, TimeInForce, AssetClass
 from alpaca.trading.models import Order, Position, TradeAccount
 from alpaca.data.historical import StockHistoricalDataClient
-from alpaca.data.requests import StockLatestTradeRequest
+from alpaca.data.requests import StockLatestTradeRequest, StockLatestQuoteRequest
 
 from config import (
     REQUEST_INTERVAL_SEC,
@@ -31,6 +32,12 @@ from config import (
     TEST_BUDGET_USD,
     EQUITY_MAX_PORTFOLIO_HEAT,
     EQUITY_MAX_OPEN_POSITIONS,
+    CIRCUIT_BREAKER_ENABLED,
+    CIRCUIT_BREAKER_MAX_CONSEC_LOSSES,
+    CIRCUIT_BREAKER_MAX_WEEKLY_DD_PCT,
+    MAX_ALLOWED_SPREAD_PCT,
+    ORDER_FILL_TIMEOUT_SEC,
+    DB_PATH,
 )
 
 logger = logging.getLogger(__name__)
@@ -144,6 +151,14 @@ class OrderManager:
             )
             return None
 
+        # Chequeo de spread Bid-Ask para control de slippage en apertura
+        spread = self.get_spread_pct(symbol)
+        if spread > MAX_ALLOWED_SPREAD_PCT:
+            logger.warning(
+                f"[{symbol}] SPREAD ANORMALMENTE AMPLIO: {spread*100:.3f}% > max={MAX_ALLOWED_SPREAD_PCT*100:.2f}%. "
+                "Posible slippage adverso en la apertura. Procediendo con cautela."
+            )
+
         order_request = MarketOrderRequest(
             symbol=symbol,
             notional=round(notional, 2),   # USD con 2 decimales
@@ -158,6 +173,65 @@ class OrderManager:
             f"Order ID: {order.id} | Status: {order.status}"
         )
         return order
+
+    @rate_limited
+    def get_spread_pct(self, symbol: str) -> float:
+        """
+        Calcula el spread Bid-Ask relativo: (Ask - Bid) / Mid.
+        Util para alertar o frenar compras con slippage excesivo en apertura.
+        """
+        try:
+            req = StockLatestQuoteRequest(symbol_or_symbols=symbol)
+            res = self._data_client.get_stock_latest_quote(req)
+            if symbol in res:
+                q = res[symbol]
+                ask = float(q.ask_price or 0.0)
+                bid = float(q.bid_price or 0.0)
+                if ask > 0 and bid > 0:
+                    mid = (ask + bid) / 2.0
+                    return (ask - bid) / mid
+        except Exception as exc:
+            logger.debug(f"[{symbol}] No se pudo consultar spread: {exc}")
+        return 0.0
+
+    @rate_limited
+    def wait_for_order_fill(self, order_id: str, timeout: float = ORDER_FILL_TIMEOUT_SEC) -> Optional[Order]:
+        """
+        Espera hasta que una orden recién enviada sea completada ('filled') en Alpaca
+        para capturar su filled_avg_price y filled_qty exactos.
+
+        Args:
+            order_id: ID de la orden en Alpaca.
+            timeout: Segundos máximos de sondeo.
+
+        Returns:
+            Objeto Order actualizado de Alpaca, o la orden disponible si agota tiempo.
+        """
+        start_time = time.time()
+        poll_interval = 0.5
+        while (time.time() - start_time) < timeout:
+            try:
+                order = self._client.get_order_by_id(order_id)
+                status_str = str(getattr(order, "status", "")).lower()
+                if "filled" in status_str:
+                    logger.info(
+                        f"[ORDER_FILL] Orden {order_id} ({order.symbol}) FILLED: "
+                        f"avg_price=${float(order.filled_avg_price):.2f}, "
+                        f"qty={float(order.filled_qty):.6f}"
+                    )
+                    return order
+                elif any(s in status_str for s in ["canceled", "expired", "rejected"]):
+                    logger.warning(f"[ORDER_FILL] Orden {order_id} finalizo sin llenar ({status_str})")
+                    return order
+            except Exception as exc:
+                logger.debug(f"Error consultando fill de orden {order_id}: {exc}")
+            time.sleep(poll_interval)
+
+        logger.debug(f"[ORDER_FILL] Timeout ({timeout}s) esperando fill inmediato de orden {order_id}.")
+        try:
+            return self._client.get_order_by_id(order_id)
+        except Exception:
+            return None
 
     @rate_limited
     def submit_sell(self, symbol: str, qty: float) -> Optional[Order]:
@@ -246,6 +320,60 @@ class OrderManager:
         )
         return positions
 
+    def check_circuit_breaker(self) -> tuple[bool, str]:
+        """
+        Verifica si el Circuit Breaker de cartera esta activado evaluando:
+        1. Rachas de perdidas consecutivas en trades cerrados (SELL_*).
+        2. Drawdown reciente sobre el capital de la cuenta.
+        """
+        if not CIRCUIT_BREAKER_ENABLED:
+            return True, "OK"
+
+        try:
+            import os
+            if not os.path.exists(DB_PATH):
+                return True, "OK"
+
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.row_factory = sqlite3.Row
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT pnl, pnl_pct FROM trades WHERE trade_type LIKE 'SELL%' "
+                    "ORDER BY id DESC LIMIT ?",
+                    (CIRCUIT_BREAKER_MAX_CONSEC_LOSSES,),
+                )
+                rows = cur.fetchall()
+
+                # Si hay N trades y todos son negativos -> activar breaker
+                if len(rows) >= CIRCUIT_BREAKER_MAX_CONSEC_LOSSES:
+                    if all(r["pnl"] is not None and r["pnl"] < 0 for r in rows):
+                        return False, (
+                            f"Circuit Breaker ACTIVO: {CIRCUIT_BREAKER_MAX_CONSEC_LOSSES} perdidas "
+                            "consecutivas detectadas. Se suspenden nuevas compras preventivamente."
+                        )
+
+                # Chequeo de drawdown en los ultimos 7 dias
+                cur.execute(
+                    "SELECT SUM(pnl) as net_pnl FROM trades WHERE trade_type LIKE 'SELL%' "
+                    "AND date >= datetime('now', '-7 days')"
+                )
+                row_dd = cur.fetchone()
+                if row_dd and row_dd["net_pnl"] is not None:
+                    weekly_loss = float(row_dd["net_pnl"])
+                    equity = self.get_account_equity()
+                    if equity > 0 and weekly_loss < 0:
+                        dd_pct = abs(weekly_loss) / equity
+                        if dd_pct >= CIRCUIT_BREAKER_MAX_WEEKLY_DD_PCT:
+                            return False, (
+                                f"Circuit Breaker ACTIVO: drawdown semanal de {dd_pct*100:.2f}% "
+                                f"excede el maximo ({CIRCUIT_BREAKER_MAX_WEEKLY_DD_PCT*100:.1f}%)."
+                            )
+
+            return True, "OK"
+        except Exception as exc:
+            logger.warning(f"Error verificando circuit breaker: {exc}")
+            return True, "OK"
+
     def can_open_position(
         self,
         symbol: str,
@@ -256,6 +384,7 @@ class OrderManager:
     ) -> tuple[bool, str]:
         """
         Evalua si la cuenta puede abrir una nueva posicion en Equities respetando:
+        0. Circuit breaker de portafolio (rachas de perdidas o drawdown critico).
         1. No duplicidad de ticker.
         2. Limite individual por posicion (% equity).
         3. Techo maximo de posiciones simultaneas (EQUITY_MAX_OPEN_POSITIONS).
@@ -266,6 +395,11 @@ class OrderManager:
             Tupla (allowed: bool, reason: str).
         """
         try:
+            # Regla 0: Circuit Breaker de Cartera
+            cb_ok, cb_reason = self.check_circuit_breaker()
+            if not cb_ok:
+                return False, cb_reason
+
             equity = self.get_account_equity()
             if equity <= 0:
                 return False, f"Equity no valido: ${equity}"

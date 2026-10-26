@@ -66,6 +66,7 @@ from signals.indicators import (
     compute_indicators, generate_signal, get_signal_summary,
     compute_crypto_indicators, generate_crypto_signal,
 )
+from signals.earnings import EarningsCalendarFilter
 from risk.kelly import compute_notional
 from execution.orders import OrderManager
 from execution.supervisor import PositionSupervisor
@@ -448,6 +449,15 @@ async def run_daily_signals(
             logger.warning(f"[{ticker}] Notional dinámico = 0. Señal descartada.")
             continue
 
+        # ── Filtro Corporativo: Evitar comprar previo a Earnings ─────────────
+        earnings_filter = EarningsCalendarFilter()
+        if earnings_filter.has_upcoming_earnings(ticker):
+            logger.warning(
+                f"[{ticker}] SEÑAL VETADA por riesgo corporativo: Anuncio de resultados "
+                "trimestrales inminente en la ventana de +/- 48h."
+            )
+            continue
+
         # ── Control Cuantitativo de Riesgo: verificar broker & Portfolio Heat ───
         can_open, risk_reason = await asyncio.get_event_loop().run_in_executor(
             None,
@@ -477,37 +487,53 @@ async def run_daily_signals(
             logger.error(f"[{ticker}] Orden rechazada por la API.")
             continue
 
-        # Obtener precio de referencia en tiempo real
-        latest_quote = await asyncio.get_event_loop().run_in_executor(
-            None, order_manager.get_latest_quote, ticker
+        # ── Sincronizacion Post-Fill: Capturar precio y cantidad reales del broker ──
+        filled_order = await asyncio.get_event_loop().run_in_executor(
+            None, order_manager.wait_for_order_fill, order.id
         )
-        entry_price = latest_quote if latest_quote > 0 else float(df_completed["close"].iloc[-1])
-        # Cantidad estimada de acciones = notional dinámico / precio_entrada
-        estimated_qty = dynamic_notional / entry_price if entry_price > 0 else 0.0
+        if filled_order and str(getattr(filled_order, "status", "")).lower() == "filled":
+            entry_price = float(filled_order.filled_avg_price)
+            actual_qty = float(filled_order.filled_qty)
+            actual_notional = round(entry_price * actual_qty, 2)
+            logger.info(
+                f"[{ticker}] Fill confirmado por Alpaca: price=${entry_price:.2f}, "
+                f"qty={actual_qty:.6f}, notional=${actual_notional:,.2f}"
+            )
+        else:
+            latest_quote = await asyncio.get_event_loop().run_in_executor(
+                None, order_manager.get_latest_quote, ticker
+            )
+            entry_price = latest_quote if latest_quote > 0 else float(df_completed["close"].iloc[-1])
+            actual_qty = dynamic_notional / entry_price if entry_price > 0 else 0.0
+            actual_notional = dynamic_notional
+
+        # Extraer ATR para TP/SL dinámico
+        atr_at_entry = float(df["ATR_14"].iloc[-1]) if "ATR_14" in df.columns else 0.0
 
         # Registrar compra en el trade log y capturar el ID del BUY
         buy_trade_id = trade_logger.log_entry({
             "ticker": ticker,
-            "notional": dynamic_notional,
+            "notional": actual_notional,
             "entry_price": entry_price,
-            "qty": estimated_qty,
+            "qty": actual_qty,
             "kelly_pct": kelly_applied,
         })
 
-        # Registrar posicion para supervision TP/SL (con ID del BUY para round-trip)
+        # Registrar posicion para supervision TP/SL (con ID del BUY y ATR dinamico)
         supervisor.add_position(
             symbol=ticker,
             entry_price=entry_price,
-            qty=estimated_qty,
-            notional=dynamic_notional,
+            qty=actual_qty,
+            notional=actual_notional,
             kelly_pct=kelly_applied,
             entry_trade_id=buy_trade_id,
+            atr_at_entry=atr_at_entry,
         )
 
         orders_placed += 1
         logger.info(
-            f"[{ticker}] Orden enviada: ${dynamic_notional:.2f} nocional | "
-            f"Precio ref: ${entry_price:.2f} | "
+            f"[{ticker}] Orden enviada y registrada: ${actual_notional:.2f} nocional | "
+            f"Precio fill/ref: ${entry_price:.2f} | "
             f"Order ID: {order.id}"
         )
 

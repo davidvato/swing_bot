@@ -144,6 +144,16 @@ def get_bot_config():
         "Universe": config.TICKERS
     }
 
+@app.get("/api/metrics/quantitative")
+def get_quantitative_metrics():
+    """Retorna las métricas cuantitativas institucionales (Sharpe, Sortino, PF, MaxDD, Expectancy)."""
+    try:
+        from logging_.trade_log import TradeLogger
+        tl = TradeLogger(db_path=config.DB_PATH)
+        return tl.get_quantitative_metrics()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/search_company")
 def search_company(q: str):
     """Searches for a company ticker by name using Yahoo Finance."""

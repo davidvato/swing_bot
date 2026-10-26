@@ -379,9 +379,13 @@ class UniverseScreener:
                 raise RuntimeError("No se obtuvieron datos del pool de candidatos.")
 
             # ── Paso 2: Calcular metricas por ticker ──────────────────────────
+            from data.ingestion import DataClient
             rows = []
-            for ticker, df in data_dict.items():
-                last_price = float(df["close"].iloc[-1]) if "close" in df.columns else 0.0
+            for ticker, df_raw in data_dict.items():
+                df = DataClient.filter_completed_bars(df_raw)
+                if df.empty or "close" not in df.columns:
+                    continue
+                last_price = float(df["close"].iloc[-1])
                 avg_volume = (
                     float(df["volume"].tail(UNIVERSE_LOOKBACK_DAYS).mean())
                     if "volume" in df.columns

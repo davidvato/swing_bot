@@ -45,11 +45,32 @@ from config import (
     MARKET_OPEN_TIME_EST,
     BREAKEVEN_TRIGGER_PCT,
     SUPERVISOR_STATE_FILE,
+    EQUITY_DYNAMIC_ATR_TPSL,
+    EQUITY_ATR_TP_MULT,
+    EQUITY_ATR_SL_MULT,
+    EQUITY_MIN_TP_PCT,
+    EQUITY_MAX_TP_PCT,
+    EQUITY_MIN_SL_PCT,
+    EQUITY_MAX_SL_PCT,
 )
 
 logger = logging.getLogger(__name__)
 
 EST = pytz.timezone(TIMEZONE_EST)
+
+
+def is_market_open_now(dt: Optional[datetime] = None) -> bool:
+    """
+    Retorna True si la sesion regular de bolsa en EE.UU. esta activa (09:30 - 16:00 EST, L-V).
+    """
+    if dt is None:
+        dt = datetime.now(EST)
+    # Lunes=0, Domingo=6
+    if dt.weekday() >= 5:
+        return False
+    market_open = dtime(9, 30)
+    market_close = dtime(16, 0)
+    return market_open <= dt.time() < market_close
 
 
 @dataclass
@@ -67,6 +88,9 @@ class PositionRecord:
         entry_trade_id: ID de la fila BUY en SQLite para vincular round-trip.
         task: Referencia a la tarea asyncio para cancelacion (no serializable).
         breakeven_activated: True cuando el SL fue movido a precio de entrada.
+        tp_pct: Porcentaje objetivo de Take-Profit (fijo o dinamico por ATR).
+        sl_pct: Porcentaje de Stop-Loss (fijo o dinamico por ATR).
+        atr_at_entry: ATR del activo al momento de entrar.
     """
     symbol: str
     entry_price: float
@@ -79,6 +103,9 @@ class PositionRecord:
     highest_price: float = field(default=0.0)
     breakeven_activated: bool = field(default=False)     # Break-Even Stop activado
     _sl_floor: float = field(default=0.0)                # Floor del SL tras break-even
+    tp_pct: float = field(default=TAKE_PROFIT_PCT)
+    sl_pct: float = field(default=STOP_LOSS_PCT)
+    atr_at_entry: float = field(default=0.0)
 
     def __post_init__(self):
         if self.highest_price <= 0.0:
@@ -88,8 +115,8 @@ class PositionRecord:
 
     @property
     def target_tp(self) -> float:
-        """Precio objetivo de Take-Profit (+TAKE_PROFIT_PCT%)."""
-        return self.entry_price * (1.0 + TAKE_PROFIT_PCT)
+        """Precio objetivo de Take-Profit (+tp_pct%)."""
+        return self.entry_price * (1.0 + self.tp_pct)
 
     @property
     def target_sl(self) -> float:
@@ -98,10 +125,10 @@ class PositionRecord:
         - Si break-even esta activado: SL = max(trailing_sl, entry_price).
           Garantiza que nunca cerremos debajo del precio de entrada una vez
           que el break-even fue activado.
-        - Si break-even NO esta activado: SL = highest_price * (1 - STOP_LOSS_PCT)
+        - Si break-even NO esta activado: SL = highest_price * (1 - sl_pct)
           (trailing stop clasico desde el maximo).
         """
-        trailing_sl = self.highest_price * (1.0 - STOP_LOSS_PCT)
+        trailing_sl = self.highest_price * (1.0 - self.sl_pct)
         if self.breakeven_activated:
             return max(trailing_sl, self._sl_floor)
         return trailing_sl
@@ -162,6 +189,9 @@ class PositionSupervisor:
                     "highest_price": rec.highest_price,
                     "breakeven_activated": rec.breakeven_activated,
                     "_sl_floor": rec._sl_floor,
+                    "tp_pct": rec.tp_pct,
+                    "sl_pct": rec.sl_pct,
+                    "atr_at_entry": rec.atr_at_entry,
                 }
             Path(SUPERVISOR_STATE_FILE).write_text(
                 json.dumps(state, indent=2), encoding="utf-8"
@@ -192,6 +222,9 @@ class PositionSupervisor:
         highest_price: Optional[float] = None,
         breakeven_activated: bool = False,
         sl_floor: float = 0.0,
+        atr_at_entry: float = 0.0,
+        tp_pct: Optional[float] = None,
+        sl_pct: Optional[float] = None,
     ) -> PositionRecord:
         """
         Registra una nueva posicion para supervision y lanza su corutina.
@@ -207,12 +240,30 @@ class PositionSupervisor:
             highest_price: Maximo historico alcanzado (para restauracion).
             breakeven_activated: Si el break-even ya fue gatillado.
             sl_floor: Suelo del SL si break-even esta activo.
+            atr_at_entry: ATR del activo en entrada (para TP/SL dinamico).
+            tp_pct: % Take-Profit (si es None, calcula dinamico por ATR o fallback).
+            sl_pct: % Stop-Loss (si es None, calcula dinamico por ATR o fallback).
 
         Returns:
             PositionRecord recien creado y registrado.
         """
         if entry_date is None:
             entry_date = date.today()
+
+        # Determinar TP y SL dinámico por ATR o fallback
+        if tp_pct is None:
+            if EQUITY_DYNAMIC_ATR_TPSL and atr_at_entry > 0 and entry_price > 0:
+                calc_tp = (atr_at_entry * EQUITY_ATR_TP_MULT) / entry_price
+                tp_pct = max(min(calc_tp, EQUITY_MAX_TP_PCT), EQUITY_MIN_TP_PCT)
+            else:
+                tp_pct = TAKE_PROFIT_PCT
+
+        if sl_pct is None:
+            if EQUITY_DYNAMIC_ATR_TPSL and atr_at_entry > 0 and entry_price > 0:
+                calc_sl = (atr_at_entry * EQUITY_ATR_SL_MULT) / entry_price
+                sl_pct = max(min(calc_sl, EQUITY_MAX_SL_PCT), EQUITY_MIN_SL_PCT)
+            else:
+                sl_pct = STOP_LOSS_PCT
 
         record = PositionRecord(
             symbol=symbol,
@@ -225,13 +276,17 @@ class PositionSupervisor:
             highest_price=highest_price if highest_price and highest_price > 0 else entry_price,
             breakeven_activated=breakeven_activated,
             _sl_floor=sl_floor,
+            tp_pct=tp_pct,
+            sl_pct=sl_pct,
+            atr_at_entry=atr_at_entry,
         )
         self._positions[symbol] = record
         self._save_state()
         logger.info(
             f"[{symbol}] Posicion registrada: "
             f"entry=${entry_price:.2f}, qty={qty:.6f}, "
-            f"TP=${record.target_tp:.2f}, SL=${record.target_sl:.2f}, "
+            f"TP=${record.target_tp:.2f} (+{record.tp_pct*100:.1f}%), "
+            f"SL=${record.target_sl:.2f} (-{record.sl_pct*100:.1f}%), "
             f"Highest=${record.highest_price:.2f}, BreakEven={record.breakeven_activated}"
             + (f", BUY_ID={entry_trade_id}" if entry_trade_id else "")
         )
@@ -243,11 +298,12 @@ class PositionSupervisor:
         Corutina principal de supervision para una posicion individual.
 
         Ciclo de monitoreo cada SUPERVISOR_POLL_INTERVAL_SEC segundos:
-          1. Consulta precio actual de la posicion.
-          2. Evalua condiciones de salida: TP, SL, tiempo maximo.
-          3. Ejecuta orden de venta de mercado si se activa alguna condicion.
-          4. Registra la operacion en el trade log.
-          5. Termina la corutina tras la venta.
+          1. Consulta horario de mercado (suspension fuera de hora regular).
+          2. Consulta precio actual de la posicion.
+          3. Evalua condiciones de salida: TP, SL, tiempo maximo.
+          4. Ejecuta orden de venta de mercado si se activa alguna condicion.
+          5. Registra la operacion en el trade log.
+          6. Termina la corutina tras la venta.
 
         Args:
             record: Registro de la posicion a supervisar.
@@ -255,13 +311,23 @@ class PositionSupervisor:
         symbol = record.symbol
         logger.info(
             f"[{symbol}] Supervision iniciada -> "
-            f"TP=${record.target_tp:.2f} (+{TAKE_PROFIT_PCT*100:.0f}%), "
-            f"SL=${record.target_sl:.2f} (-{STOP_LOSS_PCT*100:.0f}%), "
+            f"TP=${record.target_tp:.2f} (+{record.tp_pct*100:.1f}%), "
+            f"SL=${record.target_sl:.2f} (-{record.sl_pct*100:.1f}%), "
             f"Max={MAX_HOLD_DAYS} dias"
         )
 
         while True:
             try:
+                # ── Market Hours Awareness: Verificar sesion regular (09:30 - 16:00 EST) ──
+                now_est = datetime.now(EST)
+                if not is_market_open_now(now_est):
+                    logger.debug(
+                        f"[{symbol}] Mercado de Equities fuera de sesion regular ({now_est.strftime('%a %H:%M')} EST). "
+                        "Supervisor en reposo (60s)..."
+                    )
+                    await asyncio.sleep(60)
+                    continue
+
                 await asyncio.sleep(SUPERVISOR_POLL_INTERVAL_SEC)
 
                 # Consultar precio actual via la posicion abierta en Alpaca
@@ -537,6 +603,9 @@ class PositionSupervisor:
             highest_price = saved.get("highest_price", entry_price)
             breakeven_activated = saved.get("breakeven_activated", False)
             sl_floor = saved.get("_sl_floor", 0.0)
+            tp_pct = saved.get("tp_pct")
+            sl_pct = saved.get("sl_pct")
+            atr_at_entry = saved.get("atr_at_entry", 0.0)
 
             # Buscar metadata original en trade log
             last_buy = self._trade_logger.get_latest_buy(symbol)
@@ -567,6 +636,9 @@ class PositionSupervisor:
                 highest_price=highest_price,
                 breakeven_activated=breakeven_activated,
                 sl_floor=sl_floor,
+                atr_at_entry=atr_at_entry,
+                tp_pct=tp_pct,
+                sl_pct=sl_pct,
             )
             rehydrated += 1
             
