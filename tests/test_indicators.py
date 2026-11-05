@@ -237,6 +237,37 @@ class TestGenerateSignal:
         # Sin llamar a compute_indicators(), las columnas SMA/RSI no existen
         assert generate_signal(df) is False
 
+    def test_signal_blocked_when_consec_down_true_but_rsi_above_max(self):
+        """
+        La señal debe ser False cuando hay 4 dias consecutivos a la baja pero
+        el RSI-4 no esta en sobreventa real (RSI >= RSI_CONSEC_MAX = 35.0).
+        Filtro cuantitativo anti-deriva.
+        """
+        # 200 barras para SMA + 4 caídas que dejan RSI = 35.54 >= 35.0
+        closes = [100.0] * 200 + [130.0, 120.0, 112.0, 106.0, 102.0]
+        df = make_df(closes)
+        df_ind = compute_indicators(df)
+        last = df_ind.iloc[-1]
+        assert bool(last[COL_CONSEC_DOWN]) is True
+        assert last[COL_RSI] >= 35.0
+        assert last["close"] > last[COL_SMA]
+        assert generate_signal(df_ind) is False
+
+    def test_signal_allowed_when_consec_down_true_and_rsi_below_max(self):
+        """
+        La señal debe ser True cuando hay 4 dias consecutivos a la baja y
+        el RSI-4 confirma sobreventa elástica (30.0 < RSI < RSI_CONSEC_MAX = 35.0).
+        """
+        # 200 barras para SMA + 4 caídas que dejan RSI = 34.25 < 35.0 y > 30.0
+        closes = [100.0] * 200 + [130.0, 120.0, 112.0, 106.0, 101.0]
+        df = make_df(closes)
+        df_ind = compute_indicators(df)
+        last = df_ind.iloc[-1]
+        assert bool(last[COL_CONSEC_DOWN]) is True
+        assert 30.0 < last[COL_RSI] < 35.0
+        assert last["close"] > last[COL_SMA]
+        assert generate_signal(df_ind) is True
+
 
 # ─── Tests de dias consecutivos a la baja ────────────────────────────────────
 

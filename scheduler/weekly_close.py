@@ -32,6 +32,7 @@ from config import (
     TRADE_TYPE_SELL_EOW,
     UNIVERSE_UPDATE_TIME_EST,
     EOW_HOLD_IF_PROFITABLE,
+    EOW_MAX_UNREALIZED_LOSS_HOLD_PCT,
 )
 
 logger = logging.getLogger(__name__)
@@ -222,19 +223,40 @@ def friday_liquidation() -> None:
 
     # --- Paso 2: Separar posiciones a liquidar vs mantener (EOW Inteligente) ---
     if EOW_HOLD_IF_PROFITABLE:
-        positions_to_close = [p for p in open_positions if float(p.unrealized_pl) < 0]
-        positions_to_hold = [p for p in open_positions if float(p.unrealized_pl) >= 0]
+        def _should_hold_over_weekend(pos) -> bool:
+            try:
+                pl = float(pos.unrealized_pl)
+                if pl >= 0.0:
+                    return True
+                # Tolerar pérdidas insignificantes atribuibles a spread/fricción (ej. >= -0.8%)
+                plpc = float(getattr(pos, "unrealized_plpc", 0.0) or 0.0)
+                if plpc >= EOW_MAX_UNREALIZED_LOSS_HOLD_PCT:
+                    return True
+                return False
+            except Exception:
+                return False
+
+        positions_to_hold = [p for p in open_positions if _should_hold_over_weekend(p)]
+        positions_to_close = [p for p in open_positions if not _should_hold_over_weekend(p)]
         if positions_to_hold:
-            hold_symbols = [p.symbol for p in positions_to_hold]
+            hold_symbols = [
+                f"{p.symbol} ({float(getattr(p, 'unrealized_plpc', 0.0) or 0.0)*100:+.2f}%)"
+                for p in positions_to_hold
+            ]
             logger.info(
                 f"EOW INTELIGENTE: Manteniendo {len(positions_to_hold)} posicion(es) "
-                f"con ganancia durante el fin de semana: {hold_symbols}"
+                f"durante el fin de semana (en ganancia o tolerancia > {EOW_MAX_UNREALIZED_LOSS_HOLD_PCT*100:.1f}%): "
+                f"{hold_symbols}"
             )
-        close_symbols = [p.symbol for p in positions_to_close]
-        logger.info(
-            f"EOW INTELIGENTE: Liquidando {len(positions_to_close)} posicion(es) "
-            f"en perdida: {close_symbols}"
-        )
+        if positions_to_close:
+            close_symbols = [
+                f"{p.symbol} ({float(getattr(p, 'unrealized_plpc', 0.0) or 0.0)*100:+.2f}%)"
+                for p in positions_to_close
+            ]
+            logger.info(
+                f"EOW INTELIGENTE: Liquidando {len(positions_to_close)} posicion(es) "
+                f"en perdida excedente: {close_symbols}"
+            )
     else:
         positions_to_close = open_positions
         positions_to_hold = []

@@ -47,6 +47,8 @@ from config import (
     TIMEZONE_EST,
     MARKET_OPEN_TIME_EST,
     MARKET_CLOSE_TIME_EST,
+    DAILY_SIGNAL_TIME_EST,
+    BLOCK_FRIDAY_EQUITY_BUYS,
     WEEKLY_CLOSE_TIME_EST,
     UNIVERSE_UPDATE_TIME_EST,
     SUPERVISOR_POLL_INTERVAL_SEC,
@@ -160,6 +162,20 @@ def _is_market_open() -> bool:
     market_close = dtime(close_h, close_m)
 
     return market_open <= now_est.time() < market_close
+
+
+def _is_signal_time() -> bool:
+    """
+    Verifica si ha llegado la hora de escaneo de señales de equities (default: 09:45 EST).
+    Otorga 15 minutos de maduracion tras la apertura del mercado (09:30 EST)
+    para disipar la volatilidad de apertura, reducir el spread y sincronizar
+    la actualizacion semanal del screener de los lunes (09:35 EST).
+    """
+    if not _is_market_open():
+        return False
+    now_est = datetime.now(EST)
+    sig_h, sig_m = [int(x) for x in DAILY_SIGNAL_TIME_EST.split(":")]
+    return now_est.time() >= dtime(sig_h, sig_m)
 
 
 def _is_last_day_of_month() -> bool:
@@ -321,6 +337,15 @@ async def run_daily_signals(
     logger.info("─" * 60)
     logger.info("INICIO DEL CICLO DE SEÑALES DIARIO")
     logger.info("─" * 60)
+
+    # ─── Guard de Viernes: Bloquear compras de equities ───────────────────────
+    now_est = datetime.now(EST)
+    if BLOCK_FRIDAY_EQUITY_BUYS and now_est.weekday() == 4:
+        logger.info(
+            "VIERNES DETECTADO: Bloqueadas nuevas compras de equities para evitar "
+            f"liquidacion forzada EOW a las {WEEKLY_CLOSE_TIME_EST} EST (horizonte insuficiente de 6h)."
+        )
+        return
 
     # ─── Paso 0: Obtener universo activo ─────────────────────────────────────
     active_tickers = screener.get_active_universe()
@@ -881,11 +906,11 @@ async def run_main_loop(
                     await asyncio.get_event_loop().run_in_executor(None, screener.select_universe)
                     last_universe_update_date = today
 
-            # ─── Ejecutar ciclo de señales una vez al dia (al abrir mercado) ──
-            if _is_market_open():
+            # ─── Ejecutar ciclo de señales una vez al dia (09:45 EST) ────────
+            if _is_signal_time():
                 if last_signal_date != today:
                     logger.info(
-                        f"Mercado abierto ({now_est.strftime('%H:%M %Z')}). "
+                        f"Horario de señales de equities alcanzado ({now_est.strftime('%H:%M %Z')}). "
                         "Ejecutando ciclo de señales..."
                     )
                     await run_daily_signals(

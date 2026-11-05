@@ -23,6 +23,7 @@ from config import (
     RSI_PERIOD,
     RSI_OVERSOLD,
     CONSEC_DOWN_DAYS,
+    RSI_CONSEC_MAX,
     CRYPTO_SMA_MACRO,
     CRYPTO_EMA_FAST,
     CRYPTO_EMA_SLOW,
@@ -177,9 +178,13 @@ def generate_signal(df: pd.DataFrame) -> bool:
     Logica estricta (TODAS las condiciones deben cumplirse):
         SEÑAL = (close_actual > SMA_200_actual)
                 AND
-                (RSI_4_actual < RSI_OVERSOLD OR CONSEC_DOWN == True)
+                (RSI_4_actual < RSI_OVERSOLD OR (CONSEC_DOWN == True AND RSI_4_actual < RSI_CONSEC_MAX))
                 AND
                 (REL_ATR <= MAX_RELATIVE_ATR)  # Filtro de volatilidad relativa
+
+    Nota Cuantitativa:
+        Exigir RSI < RSI_CONSEC_MAX (35.0) cuando se activa CONSEC_DOWN previene
+        comprar activos en deriva bajista sin sobreventa elástica real (filtro anti-deriva).
 
     Args:
         df: DataFrame con indicadores ya calculados (output de compute_indicators).
@@ -234,13 +239,14 @@ def generate_signal(df: pd.DataFrame) -> bool:
     # Condicion 1: Precio sobre la SMA-200 (filtro de tendencia alcista)
     above_sma = close > sma_200
 
-    # Condicion 2: Sobreventa (RSI < 30) O consolidacion bajista (4 dias consecutivos)
+    # Condicion 2: Sobreventa (RSI < 30) O 4 dias a la baja con confirmacion de sobreventa (RSI < RSI_CONSEC_MAX)
     oversold_rsi = rsi_4 < RSI_OVERSOLD
-    signal = above_sma and (oversold_rsi or consec_down)
+    consec_down_valid = consec_down and (rsi_4 < RSI_CONSEC_MAX)
+    signal = above_sma and (oversold_rsi or consec_down_valid)
 
     logger.info(
         f"Señal evaluada -> close={close:.2f}, SMA={sma_200:.2f}, "
-        f"RSI={rsi_4:.2f}, ConsecDown={consec_down} -> "
+        f"RSI={rsi_4:.2f}, ConsecDown={consec_down} (valido={consec_down_valid}) -> "
         f"AboveSMA={above_sma}, OversoldRSI={oversold_rsi} -> SEÑAL={signal}"
     )
 

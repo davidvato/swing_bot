@@ -8,7 +8,7 @@ Las credenciales sensibles se cargan exclusivamente desde .env via dotenv.
 
 # ─── MODO PRUEBA: Límite de Budget ─────────────────────────────────────────
 USE_TEST_BUDGET: bool = True       # Activa el límite de capital para pruebas
-TEST_BUDGET_USD: float = 200.0     # Capital simulado total disponible
+TEST_BUDGET_USD: float = 2000.0    # Capital simulado total disponible (escalado de $200 a $2,000 para tamaño representativo)
 
 # ─── Universo de Trading (Fallback Estatico) ─────────────────────────────────
 # IMPORTANTE: Esta lista es el FALLBACK de emergencia del bot.
@@ -53,15 +53,16 @@ SMA_PERIOD: int = 200           # Periodo de la Media Movil Simple (SMA)
 RSI_PERIOD: int = 4             # Periodo del Indice de Fuerza Relativa (RSI)
 RSI_OVERSOLD: float = 30.0      # Umbral RSI para condicion de sobreventa
 CONSEC_DOWN_DAYS: int = 4       # Dias consecutivos a la baja (señal alternativa)
+RSI_CONSEC_MAX: float = 35.0    # Techo maximo de RSI-4 para que CONSEC_DOWN pueda disparar señal (filtro anti-deriva sin sobreventa)
 
 # ─── Criterio de Kelly Fraccional (Half-Kelly) ───────────────────────────────
-# CALIBRADO CON DATOS REALES (16 round-trips al 2026-10-18):
-#   WR empírico = 50.0%, Profit Factor = 1.30 (Avg Win / Avg Loss)
-#   Ratio real = $436.25 / $335.92 ≈ 1.30
-KELLY_WIN_RATE: float = 0.50    # Tasa de ganancia empirica real (actualizado de 0.60)
-KELLY_WIN_LOSS_RATIO: float = 1.30  # Ratio Ganancia/Perdida real (actualizado de 1.0)
-KELLY_FRACTION: float = 0.5     # Fraccion de Kelly aplicada (0.5 = Half-Kelly)
-MAX_POSITION_PCT: float = 0.15  # Techo duro maximo por operacion (15% del equity)
+# CALIBRADO CON DATOS REALES (44 round-trips al 2026-11-05, Fase Optimizada):
+#   WR empírico = 41.7%, Profit Factor = 1.66, Win/Loss Ratio = 1.70 (Avg Win +4.39% / Avg Loss -2.54%)
+#   Half-Kelly asigna ~3.9% del capital por posicion con EV positivo (+0.35%).
+KELLY_WIN_RATE: float = 0.42        # Tasa de ganancia empirica real (calibrada post-auditoria 2 meses)
+KELLY_WIN_LOSS_RATIO: float = 1.70  # Ratio Ganancia/Perdida real empírico (actualizado con TP dinámico ATR)
+KELLY_FRACTION: float = 0.5         # Fraccion de Kelly aplicada (0.5 = Half-Kelly)
+MAX_POSITION_PCT: float = 0.15      # Techo duro maximo por operacion (15% del equity)
 
 # ─── Control Cuantitativo de Riesgo Global en Equities (Portfolio Heat) ────────
 EQUITY_MAX_PORTFOLIO_HEAT: float = 0.60  # Techo maximo global de capital en equities (60% del equity total)
@@ -108,11 +109,12 @@ BREAKEVEN_TRIGGER_PCT: float = 0.028  # Umbral para activar break-even stop (+2.
 
 # ─── EOW Inteligente (End-Of-Week Condicional) ────────────────────────────────
 # Permite mantener posiciones durante el fin de semana SI el activo cotiza
-# POR ENCIMA del precio de entrada (posicion en ganancia o break-even).
+# POR ENCIMA del precio de entrada o dentro del margen de tolerancia de ruido/spread.
 # Si EOW_HOLD_IF_PROFITABLE=True: solo se liquida la posicion el viernes si
-# esta en perdida o si ha excedido MAX_HOLD_DAYS.
+# su perdida excede EOW_MAX_UNREALIZED_LOSS_HOLD_PCT o si ha excedido MAX_HOLD_DAYS.
 # Poner en False para restaurar el comportamiento original (liquidar todo).
-EOW_HOLD_IF_PROFITABLE: bool = True  # True = No liquidar viernes si la posicion va ganando
+EOW_HOLD_IF_PROFITABLE: bool = True  # True = No liquidar viernes si la posicion va ganando o plano
+EOW_MAX_UNREALIZED_LOSS_HOLD_PCT: float = -0.008  # Tolerancia máxima (-0.8%) para mantener sobre fin de semana
 
 # ─── Filtro de Volatilidad Relativa (Anti-Whipsaw) ───────────────────────────
 # Filtra activos con volatilidad relativa (ATR/Close) excesiva antes de entrar.
@@ -122,10 +124,12 @@ EOW_HOLD_IF_PROFITABLE: bool = True  # True = No liquidar viernes si la posicion
 MAX_RELATIVE_ATR: float = 0.04  # Maximo ATR/Close permitido (4% diario = muy volátil)
 ATR_FILTER_PERIOD: int = 14     # Periodo ATR para calcular volatilidad relativa
 
-# ─── Planificador Semanal ─────────────────────────────────────────────────────
+# ─── Planificador Semanal y Horarios de Ejecución ────────────────────────────
 WEEKLY_CLOSE_TIME_EST: str = "15:45"    # Hora de liquidacion viernes (EST)
-MARKET_OPEN_TIME_EST: str = "09:30"    # Apertura del mercado (EST)
-MARKET_CLOSE_TIME_EST: str = "16:00"   # Cierre del mercado (EST)
+MARKET_OPEN_TIME_EST: str = "09:30"    # Apertura del mercado NYSE (EST)
+DAILY_SIGNAL_TIME_EST: str = "09:45"   # Hora de ejecucion de señales de equities (15m post-apertura para disipar spread/opening cross)
+MARKET_CLOSE_TIME_EST: str = "16:00"   # Cierre del mercado NYSE (EST)
+BLOCK_FRIDAY_EQUITY_BUYS: bool = True  # Bloquea nuevas compras de equities los viernes (evita liquidacion prematura EOW en 6h)
 TIMEZONE_EST: str = "America/New_York"  # Zona horaria de referencia
 
 # ─── Rate Limiting de la API de Alpaca ───────────────────────────────────────
